@@ -1,0 +1,18 @@
+{
+  "name": "my-pi-package",
+  "keywords": ["pi-package"],
+  "scripts": {
+    "pi-extensions": "pi install ."
+  },
+  "pi": {
+    "extensions": ["./pi-extensions"],
+    "skills": ["./skills"],
+    "prompts": ["./prompts"],
+    "themes": ["./pi-themes"]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-tui": "*"
+  }
+}
