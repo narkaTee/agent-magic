@@ -274,7 +274,6 @@ export default function openAICodexAuthExtension(pi: ExtensionAPI) {
 	pi.registerProvider("openai-codex-device", {
 		baseUrl: DEFAULT_BASE_URL,
 		api: "openai-codex-responses",
-		apiKey: "OPENAI_API_KEY",
 		models: getCodexModelDefinitions(),
 		oauth: {
 			name: "ChatGPT Plus/Pro (Codex Subscription w/ Device Code)",
