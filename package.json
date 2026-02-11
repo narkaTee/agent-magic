@@ -2,7 +2,8 @@
   "name": "my-pi-package",
   "keywords": ["pi-package"],
   "scripts": {
-    "pi-extensions": "pi install ."
+    "pi": "pi install .",
+    "models": "npx tsx scripts/generate-portkey-models.ts"
   },
   "pi": {
     "extensions": ["./pi-extensions"],
