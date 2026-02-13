@@ -2,7 +2,7 @@
   "name": "my-pi-package",
   "keywords": ["pi-package"],
   "scripts": {
-    "pi": "pi install .",
+    "pi": "pi remove git:github.com/narkaTee/agent-magic || true; pi install .",
     "models": "npx tsx scripts/generate-portkey-models.ts"
   },
   "pi": {
