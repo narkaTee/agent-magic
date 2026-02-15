@@ -15,5 +15,8 @@
     "@mariozechner/pi-coding-agent": "*",
     "@mariozechner/pi-ai": "*",
     "@mariozechner/pi-tui": "*"
+  },
+  "dependencies": {
+    "@earendil-works/gondolin": "^0.3.0"
   }
 }
