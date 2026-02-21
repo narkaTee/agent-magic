@@ -1,22 +1,35 @@
 {
   "name": "my-pi-package",
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
   "scripts": {
     "pi": "pi remove git:github.com/narkaTee/agent-magic || true; pi install .",
     "models": "npx tsx scripts/generate-portkey-models.ts"
   },
   "pi": {
-    "extensions": ["./pi-extensions"],
-    "skills": ["./skills"],
-    "prompts": ["./prompts"],
-    "themes": ["./pi-themes"]
+    "extensions": [
+      "./pi-extensions"
+    ],
+    "skills": [
+      "./skills"
+    ],
+    "prompts": [
+      "./prompts"
+    ],
+    "themes": [
+      "./pi-themes"
+    ]
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "*",
     "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
     "@mariozechner/pi-tui": "*"
   },
   "dependencies": {
-    "@earendil-works/gondolin": "^0.3.0"
+    "@earendil-works/gondolin": "^0.3.0",
+    "@mozilla/readability": "^0.6.0",
+    "jsdom": "^28.1.0",
+    "turndown": "^7.2.2"
   }
 }
