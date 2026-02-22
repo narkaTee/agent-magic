@@ -1,3 +1,15 @@
+/**
+ * Tool Overrides extension.
+ *
+ * This extension takes ownership of the built-in `read`, `write`, `edit`, and `bash` tools.
+ * By default it preserves normal host behavior, but when Gondolin is enabled (via `--gondolin`
+ * or `/gondolin on`) the same tool names are transparently routed through a Gondolin VM.
+ *
+ * It also customizes TUI rendering for `read` and `write` so calls/results are easier to scan
+ * (shortened paths, line counts, range hints), while keeping tool names unchanged for the model.
+ *
+ * In short: same tool interface for the agent, optional sandboxed execution backend for users.
+ */
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -22,10 +34,49 @@ import {
 	ShadowProvider,
 	VM,
 } from "@earendil-works/gondolin";
+import { Text } from "@mariozechner/pi-tui";
 
 const GUEST_WORKSPACE = "/workspace";
 const WRAPPED_TOOL_NAMES = new Set(["read", "write", "edit", "bash"]);
 const GONDOLIN_CONFIG_PATH = path.join(os.homedir(), ".pi", "agent", "gondolin.json");
+
+function shortenPath(inputPath: string): string {
+	const home = os.homedir();
+	if (inputPath.startsWith(home)) return `~${inputPath.slice(home.length)}`;
+	return inputPath;
+}
+
+function str(value: unknown): string | null {
+	if (typeof value === "string") return value;
+	if (value == null) return "";
+	return null;
+}
+
+function countContentLines(content: string): number {
+	if (!content) return 0;
+	return content.split("\n").length;
+}
+
+function countReadLines(result: { content: Array<{ type: string; text?: string }>; details?: any }): number {
+	const truncatedLines = result.details?.truncation?.outputLines;
+	if (typeof truncatedLines === "number") return truncatedLines;
+
+	let text = result.content
+		.filter((chunk) => chunk.type === "text")
+		.map((chunk) => chunk.text ?? "")
+		.join("\n")
+		.replace(/\r\n/g, "\n")
+		.trimEnd();
+
+	if (!text) return 0;
+	if (text.startsWith("Read image file")) return 0;
+	if (/^\[Line \d+ is .*Use bash:/.test(text)) return 0;
+
+	text = text.replace(/\n\n\[[^\]]*Use offset=\d+[^\]]*\]\s*$/m, "").trimEnd();
+	if (!text) return 0;
+
+	return text.split("\n").length;
+}
 
 function shQuote(value: string): string {
 	return "'" + value.replace(/'/g, "'\\''") + "'";
@@ -384,6 +435,26 @@ export default function (pi: ExtensionAPI) {
 			});
 			return tool.execute(id, params, signal, onUpdate);
 		},
+		renderCall(args, theme) {
+			const rawPath = str(args?.file_path ?? args?.path);
+			const resolvedPath = rawPath !== null ? shortenPath(rawPath) : null;
+			const offset = args?.offset;
+			const limit = args?.limit;
+			const invalidArg = theme.fg("error", "[invalid arg]");
+			let pathDisplay =
+				resolvedPath === null ? invalidArg : resolvedPath ? theme.fg("accent", resolvedPath) : theme.fg("toolOutput", "...");
+			if (offset !== undefined || limit !== undefined) {
+				const startLine = offset ?? 1;
+				const endLine = limit !== undefined ? startLine + limit - 1 : "";
+				pathDisplay += theme.fg("warning", `:${startLine}${endLine ? `-${endLine}` : ""}`);
+			}
+			return new Text(`${theme.fg("toolTitle", theme.bold("read"))} ${pathDisplay}`, 0, 0);
+		},
+		renderResult(result, _options, theme) {
+			const lines = countReadLines(result as any);
+			const label = lines === 1 ? "1 line read" : `${lines} lines read`;
+			return new Text(theme.fg("muted", label), 0, 0);
+		},
 	});
 
 	pi.registerTool({
@@ -395,6 +466,22 @@ export default function (pi: ExtensionAPI) {
 				operations: createGondolinWriteOps(activeVm, localCwd),
 			});
 			return tool.execute(id, params, signal, onUpdate);
+		},
+		renderCall(args, theme) {
+			const rawPath = str(args?.file_path ?? args?.path);
+			const resolvedPath = rawPath !== null ? shortenPath(rawPath) : null;
+			const fileContent = str(args?.content);
+			const invalidArg = theme.fg("error", "[invalid arg]");
+			const lineOne =
+				theme.fg("toolTitle", theme.bold("write")) +
+				" " +
+				(resolvedPath === null ? invalidArg : resolvedPath ? theme.fg("accent", resolvedPath) : theme.fg("toolOutput", "..."));
+			const lines = fileContent === null ? 0 : countContentLines(fileContent);
+			const label = lines === 1 ? "1 line" : `${lines} lines`;
+			return new Text(`${lineOne}\n${theme.fg("muted", label)}`, 0, 0);
+		},
+		renderResult() {
+			return new Text("", 0, 0);
 		},
 	});
 
