@@ -1,0 +1,620 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+AUTH_DIR="${HOME}/.config/gh"
+AUTH_FILE="${AUTH_DIR}/wrapper-auth.json"
+LOCK_FILE="${AUTH_DIR}/wrapper-auth.lock"
+SKEW_SECONDS=300
+DEFAULT_WAIT_TIMEOUT=900
+EXIT_AUTH_REQUIRED=42
+EXIT_AUTH_TIMEOUT=43
+EXIT_AUTH_FAILED=44
+
+state_access_token=""
+state_refresh_token=""
+state_expires_at="0"
+state_refresh_expires_at="0"
+state_client_id=""
+pending_device_code=""
+pending_user_code=""
+pending_verification_uri=""
+pending_interval="5"
+pending_expires_at="0"
+
+usage() {
+  echo "Usage:" >&2
+  echo "  gh-app-auth [--login] [--timeout <seconds>] <gh args...>" >&2
+  echo "  gh-app-auth --wait-for-auth [--login] [--timeout <seconds>] <gh args...>" >&2
+}
+
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "ERROR: Missing required command: $1" >&2
+    exit 1
+  fi
+}
+
+is_uint() {
+  [[ "${1:-}" =~ ^[0-9]+$ ]]
+}
+
+now_epoch() {
+  date +%s
+}
+
+near_expiry() {
+  local ts="${1:-}"
+  if ! is_uint "$ts"; then
+    return 0
+  fi
+  local now
+  now=$(now_epoch)
+  (( ts <= now + SKEW_SECONDS ))
+}
+
+ensure_auth_storage() {
+  mkdir -p "$AUTH_DIR"
+  chmod 700 "$AUTH_DIR"
+  if [[ ! -f "$AUTH_FILE" ]]; then
+    printf '{}\n' > "$AUTH_FILE"
+  fi
+  chmod 600 "$AUTH_FILE"
+  if ! jq empty "$AUTH_FILE" >/dev/null 2>&1; then
+    printf '{}\n' > "$AUTH_FILE"
+    chmod 600 "$AUTH_FILE"
+  fi
+}
+
+auth_get() {
+  local expr="$1"
+  jq -r "$expr // empty" "$AUTH_FILE" 2>/dev/null || true
+}
+
+as_uint_or_zero() {
+  if is_uint "${1:-}"; then
+    printf '%s' "$1"
+  else
+    printf '0'
+  fi
+}
+
+atomic_write_auth() {
+  local content="$1"
+  local tmp
+  tmp=$(mktemp "${AUTH_DIR}/wrapper-auth.json.tmp.XXXXXX")
+  printf '%s\n' "$content" > "$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$AUTH_FILE"
+}
+
+load_state() {
+  state_access_token=$(auth_get '.access_token')
+  state_refresh_token=$(auth_get '.refresh_token')
+  state_expires_at=$(auth_get '.expires_at')
+  state_refresh_expires_at=$(auth_get '.refresh_expires_at')
+  state_client_id=$(auth_get '.client_id')
+  pending_device_code=$(auth_get '.pending_device.device_code')
+  pending_user_code=$(auth_get '.pending_device.user_code')
+  pending_verification_uri=$(auth_get '.pending_device.verification_uri')
+  pending_interval=$(auth_get '.pending_device.interval')
+  pending_expires_at=$(auth_get '.pending_device.expires_at')
+
+  if ! is_uint "$state_expires_at"; then
+    state_expires_at=0
+  fi
+  if ! is_uint "$state_refresh_expires_at"; then
+    state_refresh_expires_at=0
+  fi
+  if ! is_uint "$pending_interval" || (( pending_interval <= 0 )); then
+    pending_interval=5
+  fi
+  if ! is_uint "$pending_expires_at"; then
+    pending_expires_at=0
+  fi
+}
+
+write_state() {
+  local expires_at_num refresh_expires_at_num pending_interval_num pending_expires_at_num
+  expires_at_num=$(as_uint_or_zero "$state_expires_at")
+  refresh_expires_at_num=$(as_uint_or_zero "$state_refresh_expires_at")
+  pending_interval_num=$(as_uint_or_zero "$pending_interval")
+  pending_expires_at_num=$(as_uint_or_zero "$pending_expires_at")
+
+  local content
+  if [[ -n "$pending_device_code" && -n "$pending_user_code" && -n "$pending_verification_uri" ]]; then
+    content=$(jq -n \
+      --arg access_token "$state_access_token" \
+      --arg refresh_token "$state_refresh_token" \
+      --arg client_id "$state_client_id" \
+      --arg device_code "$pending_device_code" \
+      --arg user_code "$pending_user_code" \
+      --arg verification_uri "$pending_verification_uri" \
+      --argjson expires_at "$expires_at_num" \
+      --argjson refresh_expires_at "$refresh_expires_at_num" \
+      --argjson interval "$pending_interval_num" \
+      --argjson pending_expires_at "$pending_expires_at_num" \
+      '{
+        access_token:$access_token,
+        refresh_token:$refresh_token,
+        expires_at:$expires_at,
+        refresh_expires_at:$refresh_expires_at,
+        client_id:$client_id,
+        pending_device:{
+          device_code:$device_code,
+          user_code:$user_code,
+          verification_uri:$verification_uri,
+          interval:$interval,
+          expires_at:$pending_expires_at
+        }
+      }')
+  else
+    content=$(jq -n \
+      --arg access_token "$state_access_token" \
+      --arg refresh_token "$state_refresh_token" \
+      --arg client_id "$state_client_id" \
+      --argjson expires_at "$expires_at_num" \
+      --argjson refresh_expires_at "$refresh_expires_at_num" \
+      '{
+        access_token:$access_token,
+        refresh_token:$refresh_token,
+        expires_at:$expires_at,
+        refresh_expires_at:$refresh_expires_at,
+        client_id:$client_id
+      }')
+  fi
+
+  atomic_write_auth "$content"
+}
+
+reset_state_for_client() {
+  state_access_token=""
+  state_refresh_token=""
+  state_expires_at=0
+  state_refresh_expires_at=0
+  state_client_id="$GH_APP_CLIENT_ID"
+  pending_device_code=""
+  pending_user_code=""
+  pending_verification_uri=""
+  pending_interval=5
+  pending_expires_at=0
+  write_state
+}
+
+clear_pending() {
+  pending_device_code=""
+  pending_user_code=""
+  pending_verification_uri=""
+  pending_interval=5
+  pending_expires_at=0
+  write_state
+}
+
+pending_valid() {
+  if [[ -z "$pending_device_code" || -z "$pending_user_code" || -z "$pending_verification_uri" ]]; then
+    return 1
+  fi
+  if ! is_uint "$pending_expires_at"; then
+    return 1
+  fi
+  local now
+  now=$(now_epoch)
+  (( pending_expires_at > now ))
+}
+
+emit_auth_required_notice() {
+  echo "Authorize GitHub App access, then rerun with --wait-for-auth." >&2
+  echo "${pending_verification_uri}" >&2
+  echo "${pending_user_code}" >&2
+}
+
+post_form() {
+  local url="$1"
+  shift
+
+  local body_file http_code body
+  body_file=$(mktemp)
+  http_code=$(curl -sS -o "$body_file" -w '%{http_code}' -X POST -H 'Accept: application/json' "$@" "$url") || {
+    rm -f "$body_file"
+    return 1
+  }
+  body=$(<"$body_file")
+  rm -f "$body_file"
+
+  if ! is_uint "$http_code" || (( http_code < 200 || http_code >= 300 )); then
+    echo "ERROR: OAuth request failed (${http_code}): ${body}" >&2
+    return 1
+  fi
+
+  printf '%s' "$body"
+}
+
+save_tokens() {
+  local response_json="$1"
+  local fallback_refresh_token="${2:-}"
+  local fallback_refresh_expires_at="${3:-}"
+
+  local access_token refresh_token expires_in refresh_expires_in
+  access_token=$(jq -r '.access_token // empty' <<<"$response_json")
+  refresh_token=$(jq -r '.refresh_token // empty' <<<"$response_json")
+  expires_in=$(jq -r '.expires_in // empty' <<<"$response_json")
+  refresh_expires_in=$(jq -r '.refresh_token_expires_in // empty' <<<"$response_json")
+
+  if [[ -z "$access_token" ]]; then
+    echo "ERROR: Token response missing access_token" >&2
+    return 1
+  fi
+
+  if [[ -z "$refresh_token" ]]; then
+    refresh_token="$fallback_refresh_token"
+  fi
+
+  local now expires_at refresh_expires_at
+  now=$(now_epoch)
+
+  if is_uint "$expires_in" && (( expires_in > 0 )); then
+    expires_at=$((now + expires_in))
+  else
+    expires_at=$((now + SKEW_SECONDS))
+  fi
+
+  if is_uint "$refresh_expires_in" && (( refresh_expires_in > 0 )); then
+    refresh_expires_at=$((now + refresh_expires_in))
+  elif is_uint "$fallback_refresh_expires_at" && (( fallback_refresh_expires_at > now )); then
+    refresh_expires_at=$fallback_refresh_expires_at
+  else
+    refresh_expires_at=0
+  fi
+
+  state_access_token="$access_token"
+  state_refresh_token="$refresh_token"
+  state_expires_at="$expires_at"
+  state_refresh_expires_at="$refresh_expires_at"
+  state_client_id="$GH_APP_CLIENT_ID"
+  pending_device_code=""
+  pending_user_code=""
+  pending_verification_uri=""
+  pending_interval=5
+  pending_expires_at=0
+
+  write_state
+  printf '%s' "$access_token"
+}
+
+refresh_access_token() {
+  local refresh_token="$1"
+  local fallback_refresh_expires_at="$2"
+
+  local response_json error token
+  response_json=$(post_form \
+    'https://github.com/login/oauth/access_token' \
+    --data-urlencode "client_id=${GH_APP_CLIENT_ID}" \
+    --data-urlencode 'grant_type=refresh_token' \
+    --data-urlencode "refresh_token=${refresh_token}") || return 1
+
+  error=$(jq -r '.error // empty' <<<"$response_json")
+  if [[ -n "$error" ]]; then
+    return 1
+  fi
+
+  token=$(save_tokens "$response_json" "$refresh_token" "$fallback_refresh_expires_at") || return 1
+  printf '%s' "$token"
+}
+
+start_device_flow() {
+  local -a start_args
+  start_args=(--data-urlencode "client_id=${GH_APP_CLIENT_ID}")
+  if [[ -n "${GH_APP_SCOPE:-}" ]]; then
+    start_args+=(--data-urlencode "scope=${GH_APP_SCOPE}")
+  fi
+
+  local response_json device_code user_code verification_uri interval expires_in now
+  response_json=$(post_form 'https://github.com/login/device/code' "${start_args[@]}") || return 1
+
+  device_code=$(jq -r '.device_code // empty' <<<"$response_json")
+  user_code=$(jq -r '.user_code // empty' <<<"$response_json")
+  verification_uri=$(jq -r '.verification_uri // .verification_uri_complete // empty' <<<"$response_json")
+  interval=$(jq -r '.interval // 5' <<<"$response_json")
+  expires_in=$(jq -r '.expires_in // 900' <<<"$response_json")
+
+  if [[ -z "$device_code" || -z "$user_code" || -z "$verification_uri" ]]; then
+    echo "ERROR: Device flow start failed: ${response_json}" >&2
+    return 1
+  fi
+
+  if ! is_uint "$interval" || (( interval <= 0 )); then
+    interval=5
+  fi
+  if ! is_uint "$expires_in" || (( expires_in <= 0 )); then
+    expires_in=900
+  fi
+
+  now=$(now_epoch)
+  pending_device_code="$device_code"
+  pending_user_code="$user_code"
+  pending_verification_uri="$verification_uri"
+  pending_interval="$interval"
+  pending_expires_at=$((now + expires_in))
+  state_client_id="$GH_APP_CLIENT_ID"
+
+  write_state
+}
+
+ensure_pending_device_flow() {
+  load_state
+
+  if [[ -n "$state_client_id" && "$state_client_id" != "$GH_APP_CLIENT_ID" ]]; then
+    reset_state_for_client
+    load_state
+  fi
+
+  if pending_valid; then
+    return 0
+  fi
+
+  clear_pending
+  start_device_flow
+}
+
+require_pending_device_flow() {
+  load_state
+
+  if [[ -n "$state_client_id" && "$state_client_id" != "$GH_APP_CLIENT_ID" ]]; then
+    echo "ERROR: Pending authorization belongs to a different GH_APP_CLIENT_ID. Run without --wait-for-auth first." >&2
+    return 1
+  fi
+
+  if pending_valid; then
+    return 0
+  fi
+
+  echo "ERROR: No pending device authorization. Run the command once without --wait-for-auth first." >&2
+  return 1
+}
+
+get_access_token_noninteractive() {
+  local force_login="$1"
+
+  load_state
+
+  if [[ "$force_login" == "true" ]]; then
+    return 3
+  fi
+
+  if [[ -n "$state_client_id" && "$state_client_id" != "$GH_APP_CLIENT_ID" ]]; then
+    return 3
+  fi
+
+  if [[ -n "$state_access_token" ]] && ! near_expiry "$state_expires_at"; then
+    printf '%s' "$state_access_token"
+    return 0
+  fi
+
+  if [[ -z "$state_refresh_token" ]] || near_expiry "$state_refresh_expires_at"; then
+    return 3
+  fi
+
+  local token
+  token=$(refresh_access_token "$state_refresh_token" "$state_refresh_expires_at") || return 3
+  printf '%s' "$token"
+}
+
+poll_pending_once() {
+  load_state
+
+  if [[ -n "$state_client_id" && "$state_client_id" != "$GH_APP_CLIENT_ID" ]]; then
+    echo "ERROR: Pending authorization belongs to a different GH_APP_CLIENT_ID." >&2
+    return 12
+  fi
+
+  if ! pending_valid; then
+    echo "ERROR: Device authorization expired. Run without --wait-for-auth to start a new device flow." >&2
+    return 12
+  fi
+
+  local response_json error token
+  response_json=$(post_form \
+    'https://github.com/login/oauth/access_token' \
+    --data-urlencode "client_id=${GH_APP_CLIENT_ID}" \
+    --data-urlencode "device_code=${pending_device_code}" \
+    --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:device_code') || return 1
+
+  error=$(jq -r '.error // empty' <<<"$response_json")
+
+  case "$error" in
+    "")
+      token=$(save_tokens "$response_json" "" "0") || return 1
+      printf '%s' "$token"
+      return 0
+      ;;
+    authorization_pending)
+      return 10
+      ;;
+    slow_down)
+      pending_interval=$((pending_interval + 5))
+      write_state
+      return 10
+      ;;
+    expired_token)
+      echo "ERROR: Device authorization expired. Run without --wait-for-auth to start a new flow." >&2
+      clear_pending
+      return 11
+      ;;
+    access_denied)
+      echo "ERROR: Device authorization was denied." >&2
+      clear_pending
+      return 11
+      ;;
+    *)
+      echo "ERROR: Device flow failed: ${error}" >&2
+      return 11
+      ;;
+  esac
+}
+
+run_gh() {
+  local token="$1"
+  shift
+  GH_TOKEN="$token" gh "$@"
+}
+
+main() {
+  local wait_for_auth=false
+  local force_login=false
+  local wait_timeout="$DEFAULT_WAIT_TIMEOUT"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --help|-h)
+        usage
+        exit 0
+        ;;
+      --wait-for-auth)
+        wait_for_auth=true
+        shift
+        ;;
+      --login)
+        force_login=true
+        shift
+        ;;
+      --timeout)
+        shift
+        if [[ $# -eq 0 ]] || ! is_uint "$1" || (( "$1" <= 0 )); then
+          echo "ERROR: --timeout requires a positive integer" >&2
+          exit 1
+        fi
+        wait_timeout="$1"
+        shift
+        ;;
+      --timeout=*)
+        wait_timeout="${1#*=}"
+        if ! is_uint "$wait_timeout" || (( wait_timeout <= 0 )); then
+          echo "ERROR: --timeout requires a positive integer" >&2
+          exit 1
+        fi
+        shift
+        ;;
+      --)
+        shift
+        break
+        ;;
+      -*)
+        echo "ERROR: Unknown option: $1" >&2
+        usage
+        exit 1
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  if [[ $# -eq 0 ]]; then
+    usage
+    exit 1
+  fi
+
+  if [[ "$1" == "gh" ]]; then
+    shift
+  fi
+
+  if [[ $# -eq 0 ]]; then
+    usage
+    exit 1
+  fi
+
+  : "${GH_APP_CLIENT_ID:?Set GH_APP_CLIENT_ID}"
+
+  require_cmd gh
+  require_cmd curl
+  require_cmd jq
+  require_cmd flock
+
+  ensure_auth_storage
+  exec 9>"$LOCK_FILE"
+
+  local token
+
+  if [[ "$wait_for_auth" == "false" ]]; then
+    flock 9
+
+    if [[ "$force_login" == "true" ]]; then
+      reset_state_for_client
+    fi
+
+    if token=$(get_access_token_noninteractive "false"); then
+      flock -u 9
+      run_gh "$token" "$@"
+      exit $?
+    fi
+
+    ensure_pending_device_flow
+    load_state
+    emit_auth_required_notice
+    flock -u 9
+    exit "$EXIT_AUTH_REQUIRED"
+  fi
+
+  local deadline sleep_for
+  deadline=$(( $(now_epoch) + wait_timeout ))
+  sleep_for=5
+
+  flock 9
+
+  if [[ "$force_login" == "true" ]]; then
+    reset_state_for_client
+  fi
+
+  if token=$(get_access_token_noninteractive "false"); then
+    flock -u 9
+    run_gh "$token" "$@"
+    exit $?
+  fi
+
+  if ! require_pending_device_flow; then
+    flock -u 9
+    exit "$EXIT_AUTH_FAILED"
+  fi
+
+  load_state
+  sleep_for="$pending_interval"
+  flock -u 9
+
+  while true; do
+    if (( $(now_epoch) >= deadline )); then
+      echo "ERROR: Timed out waiting for device authorization." >&2
+      exit "$EXIT_AUTH_TIMEOUT"
+    fi
+
+    flock 9
+    if token=$(get_access_token_noninteractive "false"); then
+      flock -u 9
+      run_gh "$token" "$@"
+      exit $?
+    fi
+
+    if token=$(poll_pending_once); then
+      flock -u 9
+      run_gh "$token" "$@"
+      exit $?
+    fi
+
+    local poll_rc
+    poll_rc=$?
+
+    if [[ "$poll_rc" -eq 11 || "$poll_rc" -eq 12 ]]; then
+      flock -u 9
+      exit "$EXIT_AUTH_FAILED"
+    fi
+
+    load_state
+    sleep_for="$pending_interval"
+    flock -u 9
+
+    if ! is_uint "$sleep_for" || (( sleep_for <= 0 )); then
+      sleep_for=5
+    fi
+    sleep "$sleep_for"
+  done
+}
+
+main "$@"
