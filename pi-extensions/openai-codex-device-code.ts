@@ -1,10 +1,10 @@
 import {
-	getModels,
-	refreshOpenAICodexToken,
 	type Api,
+	getModels,
 	type Model,
 	type OAuthCredentials,
 	type OAuthLoginCallbacks,
+	refreshOpenAICodexToken,
 } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 
@@ -68,11 +68,14 @@ function decodeJwt(token: string): JwtPayload | null {
 function getAccountId(accessToken: string): string | null {
 	const payload = decodeJwt(accessToken);
 	const accountId = payload?.[JWT_CLAIM_PATH]?.chatgpt_account_id;
-	return typeof accountId === "string" && accountId.length > 0 ? accountId : null;
+	return typeof accountId === "string" && accountId.length > 0
+		? accountId
+		: null;
 }
 
 function parseIntervalSeconds(value: string | number | undefined): number {
-	if (typeof value === "number" && Number.isFinite(value) && value >= 0) return value;
+	if (typeof value === "number" && Number.isFinite(value) && value >= 0)
+		return value;
 	if (typeof value === "string") {
 		const parsed = Number.parseInt(value.trim(), 10);
 		if (Number.isFinite(parsed) && parsed >= 0) return parsed;
@@ -130,7 +133,11 @@ async function exchangeAuthorizationCode(
 		expires_in?: number;
 	};
 
-	if (!json.access_token || !json.refresh_token || typeof json.expires_in !== "number") {
+	if (
+		!json.access_token ||
+		!json.refresh_token ||
+		typeof json.expires_in !== "number"
+	) {
 		throw new Error("OpenAI token response missing fields");
 	}
 
@@ -147,7 +154,11 @@ async function exchangeAuthorizationCode(
 	};
 }
 
-async function startDeviceFlow(): Promise<{ deviceAuthId: string; userCode: string; intervalSeconds: number }> {
+async function startDeviceFlow(): Promise<{
+	deviceAuthId: string;
+	userCode: string;
+	intervalSeconds: number;
+}> {
 	const response = await fetch(DEVICE_USER_CODE_URL, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
@@ -156,12 +167,12 @@ async function startDeviceFlow(): Promise<{ deviceAuthId: string; userCode: stri
 
 	if (!response.ok) {
 		if (response.status === 404) {
-			throw new Error(
-				"Device code login is not enabled for this Account.",
-			);
+			throw new Error("Device code login is not enabled for this Account.");
 		}
 		const text = await response.text().catch(() => "");
-		throw new Error(`OpenAI device code start failed: ${response.status} ${text}`);
+		throw new Error(
+			`OpenAI device code start failed: ${response.status} ${text}`,
+		);
 	}
 
 	const json = (await response.json()) as DeviceUserCodeResponse;
@@ -204,7 +215,10 @@ async function pollDeviceAuthorizationCode(
 		if (response.ok) {
 			const json = (await response.json()) as DeviceTokenResponse;
 			if (json.authorization_code && json.code_verifier) {
-				return { authorizationCode: json.authorization_code, codeVerifier: json.code_verifier };
+				return {
+					authorizationCode: json.authorization_code,
+					codeVerifier: json.code_verifier,
+				};
 			}
 			throw new Error("OpenAI device token response missing fields");
 		}
@@ -239,13 +253,17 @@ async function pollDeviceAuthorizationCode(
 			continue;
 		}
 
-		throw new Error(`OpenAI device login failed: ${response.status}${detail ? ` ${detail}` : ""}`);
+		throw new Error(
+			`OpenAI device login failed: ${response.status}${detail ? ` ${detail}` : ""}`,
+		);
 	}
 
 	throw new Error("OpenAI device login timed out");
 }
 
-async function loginWithDeviceCode(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials> {
+async function loginWithDeviceCode(
+	callbacks: OAuthLoginCallbacks,
+): Promise<OAuthCredentials> {
 	const started = await startDeviceFlow();
 	callbacks.onAuth({
 		url: DEVICE_VERIFICATION_URL,
@@ -259,14 +277,22 @@ async function loginWithDeviceCode(callbacks: OAuthLoginCallbacks): Promise<OAut
 		started.intervalSeconds,
 		callbacks.signal,
 	);
-	return exchangeAuthorizationCode(pollResult.authorizationCode, pollResult.codeVerifier, DEVICE_REDIRECT_URI);
+	return exchangeAuthorizationCode(
+		pollResult.authorizationCode,
+		pollResult.codeVerifier,
+		DEVICE_REDIRECT_URI,
+	);
 }
 
-async function login(callbacks: OAuthLoginCallbacks): Promise<OAuthCredentials> {
+async function login(
+	callbacks: OAuthLoginCallbacks,
+): Promise<OAuthCredentials> {
 	return loginWithDeviceCode(callbacks);
 }
 
-async function refreshToken(credentials: OAuthCredentials): Promise<OAuthCredentials> {
+async function refreshToken(
+	credentials: OAuthCredentials,
+): Promise<OAuthCredentials> {
 	return refreshOpenAICodexToken(credentials.refresh);
 }
 

@@ -1,19 +1,19 @@
-import {
-	DEFAULT_MAX_BYTES,
-	DEFAULT_MAX_LINES,
-	formatSize,
-	truncateHead,
-	type TruncationResult,
-	type ExtensionAPI,
-} from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
-import { Text } from "@mariozechner/pi-tui";
-import { Readability } from "@mozilla/readability";
-import { JSDOM } from "jsdom";
-import TurndownService from "turndown";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+	DEFAULT_MAX_BYTES,
+	DEFAULT_MAX_LINES,
+	type ExtensionAPI,
+	formatSize,
+	type TruncationResult,
+	truncateHead,
+} from "@mariozechner/pi-coding-agent";
+import { Text } from "@mariozechner/pi-tui";
+import { Readability } from "@mozilla/readability";
+import { Type } from "@sinclair/typebox";
+import { JSDOM } from "jsdom";
+import TurndownService from "turndown";
 
 const BRAVE_SEARCH_ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
 const DEFAULT_SEARCH_COUNT = 10;
@@ -21,20 +21,42 @@ const DEFAULT_FETCH_TIMEOUT_MS = 20000;
 
 const WebSearchParams = Type.Object({
 	query: Type.String({ description: "Search query" }),
-	count: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: "Number of results (1-20, default 10)" })),
-	offset: Type.Optional(Type.Integer({ minimum: 0, description: "Result offset for pagination" })),
-	country: Type.Optional(Type.String({ description: "Country code (e.g. US, DE, JP)" })),
-	search_lang: Type.Optional(Type.String({ description: "Search language code (e.g. en, de, fr)" })),
-	safesearch: Type.Optional(Type.String({ description: "Safe search mode: off, moderate, strict" })),
+	count: Type.Optional(
+		Type.Integer({
+			minimum: 1,
+			maximum: 20,
+			description: "Number of results (1-20, default 10)",
+		}),
+	),
+	offset: Type.Optional(
+		Type.Integer({ minimum: 0, description: "Result offset for pagination" }),
+	),
+	country: Type.Optional(
+		Type.String({ description: "Country code (e.g. US, DE, JP)" }),
+	),
+	search_lang: Type.Optional(
+		Type.String({ description: "Search language code (e.g. en, de, fr)" }),
+	),
+	safesearch: Type.Optional(
+		Type.String({ description: "Safe search mode: off, moderate, strict" }),
+	),
 });
 
 const WebFetchParams = Type.Object({
 	url: Type.String({ description: "URL to fetch" }),
 	timeout_ms: Type.Optional(
-		Type.Integer({ minimum: 1000, maximum: 120000, description: "Request timeout in milliseconds (default 20000)" }),
+		Type.Integer({
+			minimum: 1000,
+			maximum: 120000,
+			description: "Request timeout in milliseconds (default 20000)",
+		}),
 	),
 	max_chars: Type.Optional(
-		Type.Integer({ minimum: 1000, maximum: 200000, description: "Maximum markdown characters before final truncation" }),
+		Type.Integer({
+			minimum: 1000,
+			maximum: 200000,
+			description: "Maximum markdown characters before final truncation",
+		}),
 	),
 });
 
@@ -69,7 +91,10 @@ type WebFetchDetails = {
 	fullOutputPath?: string;
 };
 
-function mergeSignals(signal: AbortSignal | undefined, timeoutMs: number): { signal: AbortSignal; cleanup: () => void } {
+function mergeSignals(
+	signal: AbortSignal | undefined,
+	timeoutMs: number,
+): { signal: AbortSignal; cleanup: () => void } {
 	const controller = new AbortController();
 	const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 	const onAbort = () => controller.abort();
@@ -83,7 +108,10 @@ function mergeSignals(signal: AbortSignal | undefined, timeoutMs: number): { sig
 	};
 }
 
-function withTruncationNotice(output: string, prefix: string): {
+function withTruncationNotice(
+	output: string,
+	prefix: string,
+): {
 	text: string;
 	truncation?: TruncationResult;
 	fullOutputPath?: string;
@@ -105,7 +133,12 @@ function withTruncationNotice(output: string, prefix: string): {
 	return { text, truncation, fullOutputPath };
 }
 
-function formatSearchMarkdown(query: string, count: number, offset: number, results: SearchResultItem[]): string {
+function formatSearchMarkdown(
+	query: string,
+	count: number,
+	offset: number,
+	results: SearchResultItem[],
+): string {
 	const lines: string[] = [
 		`# Web search results`,
 		`Query: ${query}`,
@@ -129,7 +162,10 @@ function formatSearchMarkdown(query: string, count: number, offset: number, resu
 			lines.push(`   Age: ${result.age}`);
 		}
 		if (result.description) lines.push(`   Description: ${result.description}`);
-		const snippets = result.extra_snippets?.filter((snippet) => snippet.trim().length > 0).slice(0, 2) ?? [];
+		const snippets =
+			result.extra_snippets
+				?.filter((snippet) => snippet.trim().length > 0)
+				.slice(0, 2) ?? [];
 		if (snippets.length > 0) {
 			lines.push("Snippets:");
 		}
@@ -164,7 +200,10 @@ export default function (pi: ExtensionAPI) {
 				return {
 					isError: true,
 					content: [
-						{ type: "text", text: "Missing BRAVE_SEARCH_API_KEY environment variable." },
+						{
+							type: "text",
+							text: "Missing BRAVE_SEARCH_API_KEY environment variable.",
+						},
 					],
 					details: {},
 				};
@@ -175,7 +214,7 @@ export default function (pi: ExtensionAPI) {
 				q: params.query,
 				count: String(count),
 				offset: String(offset),
-				result_filter: "web"
+				result_filter: "web",
 			});
 			if (params.country) query.set("country", params.country);
 			if (params.search_lang) query.set("search_lang", params.search_lang);
@@ -199,7 +238,10 @@ export default function (pi: ExtensionAPI) {
 				return {
 					isError: true,
 					content: [
-						{ type: "text", text: `Brave API error ${response.status}: ${body || response.statusText}` },
+						{
+							type: "text",
+							text: `Brave API error ${response.status}: ${body || response.statusText}`,
+						},
 					],
 					details: {},
 				};
@@ -240,15 +282,24 @@ export default function (pi: ExtensionAPI) {
 		},
 		renderCall(args, theme) {
 			return new Text(
-				theme.fg("toolTitle", theme.bold("web_search ")) + theme.fg("muted", String(args.query ?? "")),
+				theme.fg("toolTitle", theme.bold("web_search ")) +
+					theme.fg("muted", String(args.query ?? "")),
 				0,
 				0,
 			);
 		},
 		renderResult(result, { expanded }, theme) {
-			if (result.isError) {
+			const isError = Boolean((result as { isError?: boolean }).isError);
+			if (isError) {
 				const text = result.content[0];
-				return new Text(theme.fg("error", text?.type === "text" ? text.text : "web_search failed"), 0, 0);
+				return new Text(
+					theme.fg(
+						"error",
+						text?.type === "text" ? text.text : "web_search failed",
+					),
+					0,
+					0,
+				);
 			}
 			const details = result.details as Partial<WebSearchDetails> | undefined;
 			if (!details?.query || !details.results) {
@@ -260,12 +311,16 @@ export default function (pi: ExtensionAPI) {
 				.map((item) => item.url)
 				.filter((url) => typeof url === "string" && url.length > 0)
 				.slice(0, maxUrls);
-			const lines: string[] = [theme.fg("muted", `Results: ${details.results.length}`)];
+			const lines: string[] = [
+				theme.fg("muted", `Results: ${details.results.length}`),
+			];
 			for (const url of urls) {
 				lines.push(theme.fg("dim", `- ${url}`));
 			}
 			if (!expanded && details.results.length > urls.length) {
-				lines.push(theme.fg("dim", `... ${details.results.length - urls.length} more`));
+				lines.push(
+					theme.fg("dim", `... ${details.results.length - urls.length} more`),
+				);
 			}
 			return new Text(lines.join("\n"), 0, 0);
 		},
@@ -291,13 +346,21 @@ export default function (pi: ExtensionAPI) {
 			if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
 				return {
 					isError: true,
-					content: [{ type: "text", text: `Unsupported protocol: ${parsedUrl.protocol}` }],
+					content: [
+						{
+							type: "text",
+							text: `Unsupported protocol: ${parsedUrl.protocol}`,
+						},
+					],
 					details: {},
 				};
 			}
 			const requestUrl = normalizeFetchUrl(parsedUrl);
 			const timeoutMs = params.timeout_ms ?? DEFAULT_FETCH_TIMEOUT_MS;
-			const { signal: requestSignal, cleanup } = mergeSignals(signal, timeoutMs);
+			const { signal: requestSignal, cleanup } = mergeSignals(
+				signal,
+				timeoutMs,
+			);
 			let response: Response;
 			try {
 				response = await fetch(requestUrl.toString(), {
@@ -305,7 +368,8 @@ export default function (pi: ExtensionAPI) {
 					redirect: "follow",
 					headers: {
 						"User-Agent": "pi-web-tool/1.0",
-						Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8",
+						Accept:
+							"text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8",
 					},
 					signal: requestSignal,
 				});
@@ -316,7 +380,12 @@ export default function (pi: ExtensionAPI) {
 				const body = await response.text().catch(() => "");
 				return {
 					isError: true,
-					content: [{ type: "text", text: `Fetch failed with status ${response.status}: ${body || response.statusText}` }],
+					content: [
+						{
+							type: "text",
+							text: `Fetch failed with status ${response.status}: ${body || response.statusText}`,
+						},
+					],
 					details: {},
 				};
 			}
@@ -331,7 +400,11 @@ export default function (pi: ExtensionAPI) {
 			let language: string | undefined;
 			let markdown = "";
 
-			if (contentType.includes("text/html") || contentType.includes("application/xhtml+xml") || body.includes("<html")) {
+			if (
+				contentType.includes("text/html") ||
+				contentType.includes("application/xhtml+xml") ||
+				body.includes("<html")
+			) {
 				const dom = new JSDOM(body, { url: finalUrl });
 				language = dom.window.document.documentElement.lang || undefined;
 				const article = new Readability(dom.window.document).parse();
@@ -339,9 +412,16 @@ export default function (pi: ExtensionAPI) {
 				byline = article?.byline ?? undefined;
 				siteName = article?.siteName ?? undefined;
 				excerpt = article?.excerpt ?? undefined;
-				const contentHtml = article?.content ?? dom.window.document.body?.innerHTML ?? "";
-				const turndown = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced" });
-				markdown = turndown.turndown(contentHtml).replace(/\n{3,}/g, "\n\n").trim();
+				const contentHtml =
+					article?.content ?? dom.window.document.body?.innerHTML ?? "";
+				const turndown = new TurndownService({
+					headingStyle: "atx",
+					codeBlockStyle: "fenced",
+				});
+				markdown = turndown
+					.turndown(contentHtml)
+					.replace(/\n{3,}/g, "\n\n")
+					.trim();
 			} else {
 				title = finalUrl;
 				markdown = body.trim();
@@ -385,15 +465,24 @@ export default function (pi: ExtensionAPI) {
 		},
 		renderCall(args, theme) {
 			return new Text(
-				theme.fg("toolTitle", theme.bold("web_fetch ")) + theme.fg("muted", String(args.url ?? "")),
+				theme.fg("toolTitle", theme.bold("web_fetch ")) +
+					theme.fg("muted", String(args.url ?? "")),
 				0,
 				0,
 			);
 		},
 		renderResult(result, _options, theme) {
-			if (result.isError) {
+			const isError = Boolean((result as { isError?: boolean }).isError);
+			if (isError) {
 				const text = result.content[0];
-				return new Text(theme.fg("error", text?.type === "text" ? text.text : "web_fetch failed"), 0, 0);
+				return new Text(
+					theme.fg(
+						"error",
+						text?.type === "text" ? text.text : "web_fetch failed",
+					),
+					0,
+					0,
+				);
 			}
 			const details = result.details as Partial<WebFetchDetails> | undefined;
 			if (!details?.finalUrl || !details.title) {
@@ -405,8 +494,10 @@ export default function (pi: ExtensionAPI) {
 				theme.fg("dim", `Content-Type: ${details.contentType || "unknown"}`),
 				theme.fg("dim", `Content-Length: ${details.contentLength ?? 0}`),
 			];
-			if (details.siteName) lines.push(theme.fg("dim", `Site: ${details.siteName}`));
-			if (details.byline) lines.push(theme.fg("dim", `Byline: ${details.byline}`));
+			if (details.siteName)
+				lines.push(theme.fg("dim", `Site: ${details.siteName}`));
+			if (details.byline)
+				lines.push(theme.fg("dim", `Byline: ${details.byline}`));
 			return new Text(lines.join("\n"), 0, 0);
 		},
 	});

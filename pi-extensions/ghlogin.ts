@@ -10,11 +10,17 @@ const WAIT_TIMEOUT_SECONDS = "900";
 const AUTH_REQUIRED_EXIT_CODE = 42;
 
 function trimOutput(result: ExecResult): string {
-	const text = (result.stderr || result.stdout || `exit code ${result.code}`).trim();
+	const text = (
+		result.stderr ||
+		result.stdout ||
+		`exit code ${result.code}`
+	).trim();
 	return text || `exit code ${result.code}`;
 }
 
-function parseAuthPrompt(text: string): { instruction: string; url: string; code: string } | undefined {
+function parseAuthPrompt(
+	text: string,
+): { instruction: string; url: string; code: string } | undefined {
 	const lines = text
 		.split(/\r?\n/)
 		.map((line) => line.trim())
@@ -42,7 +48,9 @@ function findWrapper(cwd: string): string | undefined {
 
 function readAccessToken(): string | undefined {
 	try {
-		const json = JSON.parse(fs.readFileSync(AUTH_FILE, "utf8")) as { access_token?: string };
+		const json = JSON.parse(fs.readFileSync(AUTH_FILE, "utf8")) as {
+			access_token?: string;
+		};
 		if (typeof json.access_token === "string" && json.access_token.length > 0) {
 			return json.access_token;
 		}
@@ -54,10 +62,17 @@ function readAccessToken(): string | undefined {
 
 type EnsureAuthResult =
 	| { kind: "ready" }
-	| { kind: "auth-required"; prompt: { instruction: string; url: string; code: string } }
+	| {
+			kind: "auth-required";
+			prompt: { instruction: string; url: string; code: string };
+	  }
 	| { kind: "error"; error: string };
 
-async function ensureWrapperAuth(pi: ExtensionAPI, wrapperPath: string, cwd: string): Promise<EnsureAuthResult> {
+async function ensureWrapperAuth(
+	pi: ExtensionAPI,
+	wrapperPath: string,
+	cwd: string,
+): Promise<EnsureAuthResult> {
 	const initial = await pi.exec(wrapperPath, ["auth", "status"], { cwd });
 
 	if (initial.code === 0) {
@@ -65,38 +80,66 @@ async function ensureWrapperAuth(pi: ExtensionAPI, wrapperPath: string, cwd: str
 	}
 
 	if (initial.code !== AUTH_REQUIRED_EXIT_CODE) {
-		return { kind: "error", error: `gh-app-auth failed: ${trimOutput(initial)}` };
+		return {
+			kind: "error",
+			error: `gh-app-auth failed: ${trimOutput(initial)}`,
+		};
 	}
 
 	const prompt = parseAuthPrompt(initial.stderr);
 	if (!prompt) {
-		return { kind: "error", error: `gh-app-auth requested auth but output was unexpected: ${trimOutput(initial)}` };
+		return {
+			kind: "error",
+			error: `gh-app-auth requested auth but output was unexpected: ${trimOutput(initial)}`,
+		};
 	}
 
 	return { kind: "auth-required", prompt };
 }
 
-async function waitForWrapperAuth(pi: ExtensionAPI, wrapperPath: string, cwd: string): Promise<{ ok: true } | { ok: false; error: string }> {
-	const waited = await pi.exec(wrapperPath, ["--wait-for-auth", "--timeout", WAIT_TIMEOUT_SECONDS, "auth", "status"], {
-		cwd,
-	});
+async function waitForWrapperAuth(
+	pi: ExtensionAPI,
+	wrapperPath: string,
+	cwd: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+	const waited = await pi.exec(
+		wrapperPath,
+		["--wait-for-auth", "--timeout", WAIT_TIMEOUT_SECONDS, "auth", "status"],
+		{
+			cwd,
+		},
+	);
 	if (waited.code !== 0) {
-		return { ok: false, error: `Waiting for GitHub auth failed: ${trimOutput(waited)}` };
+		return {
+			ok: false,
+			error: `Waiting for GitHub auth failed: ${trimOutput(waited)}`,
+		};
 	}
 	return { ok: true };
 }
 
-async function loginGhWithToken(pi: ExtensionAPI, cwd: string, token: string): Promise<ExecResult> {
+async function loginGhWithToken(
+	pi: ExtensionAPI,
+	cwd: string,
+	token: string,
+): Promise<ExecResult> {
 	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-ghlogin-"));
 	const tokenFile = path.join(tmpDir, "token");
 	fs.writeFileSync(tokenFile, `${token}\n`, { mode: 0o600 });
 	try {
-		return await pi.exec("bash", ["-c", "gh auth login --hostname github.com --with-token < \"$0\"", tokenFile], { cwd });
+		return await pi.exec(
+			"bash",
+			[
+				"-c",
+				'gh auth login --hostname github.com --with-token < "$0"',
+				tokenFile,
+			],
+			{ cwd },
+		);
 	} finally {
 		try {
 			fs.rmSync(tmpDir, { recursive: true, force: true });
-		} catch {
-		}
+		} catch {}
 	}
 }
 
@@ -122,9 +165,12 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			if (authResult.kind === "auth-required") {
-				ctx.ui.notify(`${authResult.prompt.instruction}\n${authResult.prompt.url}\n${authResult.prompt.code}`, "info");
+				ctx.ui.notify(
+					`${authResult.prompt.instruction}\n${authResult.prompt.url}\n${authResult.prompt.code}`,
+					"info",
+				);
 				const waited = await waitForWrapperAuth(pi, wrapperPath, ctx.cwd);
-				if (!waited.ok) {
+				if (waited.ok === false) {
 					ctx.ui.notify(waited.error, "error");
 					return;
 				}
@@ -142,9 +188,16 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			const status = await pi.exec("gh", ["auth", "status", "--hostname", "github.com"], { cwd: ctx.cwd });
+			const status = await pi.exec(
+				"gh",
+				["auth", "status", "--hostname", "github.com"],
+				{ cwd: ctx.cwd },
+			);
 			if (status.code !== 0) {
-				ctx.ui.notify(`gh login completed, but status check failed: ${trimOutput(status)}`, "warning");
+				ctx.ui.notify(
+					`gh login completed, but status check failed: ${trimOutput(status)}`,
+					"warning",
+				);
 				return;
 			}
 

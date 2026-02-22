@@ -5,7 +5,10 @@
   ],
   "scripts": {
     "pi": "pi remove git:github.com/narkaTee/agent-magic || true; pi install .",
-    "models": "npx tsx scripts/generate-portkey-models.ts"
+    "models": "npx tsx scripts/generate-portkey-models.ts",
+    "check:biome": "biome check --write --error-on-warnings pi-extensions scripts",
+    "check:types": "tsgo --noEmit -p tsconfig.check.json",
+    "check": "npm run check:biome && npm run check:types"
   },
   "pi": {
     "extensions": [
@@ -31,5 +34,11 @@
     "@mozilla/readability": "^0.6.0",
     "jsdom": "^28.1.0",
     "turndown": "^7.2.2"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.4",
+    "@types/jsdom": "^27.0.0",
+    "@types/turndown": "^5.0.6",
+    "@typescript/native-preview": "^7.0.0-dev.20260222.1"
   }
 }

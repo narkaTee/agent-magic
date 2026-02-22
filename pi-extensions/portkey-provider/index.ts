@@ -8,7 +8,11 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { PORTKEY_MODELS, type PortkeyModel, type ApiType } from "./portkey-models.generated.js";
+import {
+	type ApiType,
+	PORTKEY_MODELS,
+	type PortkeyModel,
+} from "./portkey-models.generated.js";
 
 const apiBaseUrls: Record<ApiType, string> = {
 	"anthropic-messages": "https://api.portkey.ai",
@@ -17,7 +21,7 @@ const apiBaseUrls: Record<ApiType, string> = {
 };
 
 function toProviderModels(models: Record<string, PortkeyModel>) {
-	return Object.values(models).map(m => ({
+	return Object.values(models).map((m) => ({
 		id: m.id,
 		name: m.name,
 		reasoning: m.reasoning,

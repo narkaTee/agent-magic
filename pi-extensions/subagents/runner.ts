@@ -39,7 +39,9 @@ export interface RunSubagentResult {
 function extractAssistantText(message: Message): string {
 	if (message.role !== "assistant") return "";
 	return message.content
-		.filter((part): part is { type: "text"; text: string } => part.type === "text")
+		.filter(
+			(part): part is { type: "text"; text: string } => part.type === "text",
+		)
 		.map((part) => part.text)
 		.join("\n")
 		.trim();
@@ -62,7 +64,9 @@ function extractAssistantToolCalls(message: Message): SubagentToolCall[] {
 	return calls;
 }
 
-function createPromptFile(prompt: string): { dir: string; file: string } | undefined {
+function createPromptFile(
+	prompt: string,
+): { dir: string; file: string } | undefined {
 	if (!prompt.trim()) return undefined;
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-subagent-"));
 	const file = path.join(dir, "system-prompt.md");
@@ -70,10 +74,13 @@ function createPromptFile(prompt: string): { dir: string; file: string } | undef
 	return { dir, file };
 }
 
-export async function runSubagent(options: RunSubagentOptions): Promise<RunSubagentResult> {
+export async function runSubagent(
+	options: RunSubagentOptions,
+): Promise<RunSubagentResult> {
 	const args = ["--mode", "json", "-p", "--no-session"];
 	if (options.model) args.push("--model", options.model);
-	if (options.tools && options.tools.length > 0) args.push("--tools", options.tools.join(","));
+	if (options.tools && options.tools.length > 0)
+		args.push("--tools", options.tools.join(","));
 
 	const promptFile = createPromptFile(options.systemPrompt);
 	if (promptFile) args.push("--append-system-prompt", promptFile.file);
@@ -117,21 +124,25 @@ export async function runSubagent(options: RunSubagentOptions): Promise<RunSubag
 			const processLine = (line: string) => {
 				const trimmed = line.trim();
 				if (!trimmed) return;
-				let event: any;
+				let event: unknown;
 				try {
 					event = JSON.parse(trimmed);
 				} catch {
 					return;
 				}
-				if (event.type !== "message_end" || !event.message) return;
-				const message = event.message as Message;
+				if (!event || typeof event !== "object") return;
+				const messageEnd = event as { type?: unknown; message?: unknown };
+				if (messageEnd.type !== "message_end" || !messageEnd.message) return;
+				const message = messageEnd.message as Message;
 				messages.push(message);
 				if (message.role !== "assistant") return;
 
 				const messageToolCalls = extractAssistantToolCalls(message);
 				let changed = false;
 				for (const call of messageToolCalls) {
-					const key = call.id ? call.id : `${call.name}:${JSON.stringify(call.arguments)}`;
+					const key = call.id
+						? call.id
+						: `${call.name}:${JSON.stringify(call.arguments)}`;
 					if (seenToolCalls.has(key)) continue;
 					seenToolCalls.add(key);
 					toolCalls.push(call);
@@ -191,7 +202,16 @@ export async function runSubagent(options: RunSubagentOptions): Promise<RunSubag
 			throw new Error("Subagent aborted");
 		}
 
-		return { exitCode, stderr, messages, finalText, toolCalls, stopReason, errorMessage, model };
+		return {
+			exitCode,
+			stderr,
+			messages,
+			finalText,
+			toolCalls,
+			stopReason,
+			errorMessage,
+			model,
+		};
 	} finally {
 		if (promptFile) {
 			try {

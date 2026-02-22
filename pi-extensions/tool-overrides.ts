@@ -13,14 +13,19 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-
+import {
+	createHttpHooks,
+	RealFSProvider,
+	ShadowProvider,
+	VM,
+} from "@earendil-works/gondolin";
 import type {
+	BashOperations,
+	EditOperations,
 	ExtensionAPI,
 	ExtensionContext,
 	ReadOperations,
 	WriteOperations,
-	EditOperations,
-	BashOperations,
 } from "@mariozechner/pi-coding-agent";
 import {
 	createBashTool,
@@ -28,17 +33,16 @@ import {
 	createReadTool,
 	createWriteTool,
 } from "@mariozechner/pi-coding-agent";
-import {
-	createHttpHooks,
-	RealFSProvider,
-	ShadowProvider,
-	VM,
-} from "@earendil-works/gondolin";
 import { Text } from "@mariozechner/pi-tui";
 
 const GUEST_WORKSPACE = "/workspace";
 const WRAPPED_TOOL_NAMES = new Set(["read", "write", "edit", "bash"]);
-const GONDOLIN_CONFIG_PATH = path.join(os.homedir(), ".pi", "agent", "gondolin.json");
+const GONDOLIN_CONFIG_PATH = path.join(
+	os.homedir(),
+	".pi",
+	"agent",
+	"gondolin.json",
+);
 
 function shortenPath(inputPath: string): string {
 	const home = os.homedir();
@@ -57,7 +61,10 @@ function countContentLines(content: string): number {
 	return content.split("\n").length;
 }
 
-function countReadLines(result: { content: Array<{ type: string; text?: string }>; details?: any }): number {
+function countReadLines(result: {
+	content: Array<{ type: string; text?: string }>;
+	details?: { truncation?: { outputLines?: unknown } };
+}): number {
 	const truncatedLines = result.details?.truncation?.outputLines;
 	if (typeof truncatedLines === "number") return truncatedLines;
 
@@ -79,7 +86,7 @@ function countReadLines(result: { content: Array<{ type: string; text?: string }
 }
 
 function shQuote(value: string): string {
-	return "'" + value.replace(/'/g, "'\\''") + "'";
+	return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 function toGuestPath(localCwd: string, localPath: string): string {
@@ -97,14 +104,16 @@ function shouldShadowWorkspacePath(inputPath: string): boolean {
 	const parts = normalized.split("/").filter(Boolean);
 	if (parts.length === 0) return false;
 	const base = parts[parts.length - 1];
-	if (base === ".env" || base.startsWith(".env.") || base === ".npmrc") return true;
+	if (base === ".env" || base.startsWith(".env.") || base === ".npmrc")
+		return true;
 	if (parts.includes(".aws")) return true;
 	return false;
 }
 
 function createWorkspaceProvider(localCwd: string) {
 	return new ShadowProvider(new RealFSProvider(localCwd), {
-		shouldShadow: ({ path: providerPath }) => shouldShadowWorkspacePath(providerPath),
+		shouldShadow: ({ path: providerPath }) =>
+			shouldShadowWorkspacePath(providerPath),
 		writeMode: "deny",
 	});
 }
@@ -126,7 +135,7 @@ function createSecretHooks(ctx?: ExtensionContext) {
 						hosts: ["api.github.com"],
 						value: githubToken,
 					},
-			  }
+				}
 			: undefined,
 	});
 }
@@ -169,8 +178,7 @@ async function closeVm(vm: VM | null): Promise<void> {
 	if (!vm) return;
 	try {
 		await vm.close();
-	} catch {
-	}
+	} catch {}
 }
 
 function createGondolinReadOps(vm: VM, localCwd: string): ReadOperations {
@@ -181,7 +189,11 @@ function createGondolinReadOps(vm: VM, localCwd: string): ReadOperations {
 		},
 		access: async (p) => {
 			const guestPath = toGuestPath(localCwd, p);
-			const r = await vm.exec(["/bin/sh", "-lc", `test -r ${shQuote(guestPath)}`]);
+			const r = await vm.exec([
+				"/bin/sh",
+				"-lc",
+				`test -r ${shQuote(guestPath)}`,
+			]);
 			if (!r.ok) throw new Error(`not readable: ${p}`);
 		},
 		detectImageMimeType: async (p) => {
@@ -193,7 +205,9 @@ function createGondolinReadOps(vm: VM, localCwd: string): ReadOperations {
 			]);
 			if (!r.ok) return null;
 			const mime = r.stdout.trim();
-			return ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(mime)
+			return ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(
+				mime,
+			)
 				? mime
 				: null;
 		},
@@ -240,9 +254,9 @@ function createGondolinBashOps(
 			const timer =
 				timeout && timeout > 0
 					? setTimeout(() => {
-						timedOut = true;
-						ac.abort();
-					  }, timeout * 1000)
+							timedOut = true;
+							ac.abort();
+						}, timeout * 1000)
 					: undefined;
 
 			try {
@@ -295,10 +309,9 @@ export default function (pi: ExtensionAPI) {
 		if (vmStarting) return vmStarting;
 
 		const startEpoch = ++vmStartEpoch;
-		let starting: Promise<VM>;
-		starting = (async () => {
+		const starting = (async () => {
 			const created = await createVm(localCwd, ctx);
-			if (!sandboxEnabled || vmStarting !== starting || startEpoch !== vmStartEpoch) {
+			if (!sandboxEnabled || startEpoch !== vmStartEpoch) {
 				await closeVm(created);
 				throw new Error("Gondolin sandbox startup cancelled");
 			}
@@ -323,12 +336,17 @@ export default function (pi: ExtensionAPI) {
 	const setReadyStatus = (ctx: ExtensionContext) => {
 		const allToolNames = pi.getAllTools().map((tool) => tool.name);
 		const wrapped = allToolNames.filter((name) => WRAPPED_TOOL_NAMES.has(name));
-		const unwrapped = allToolNames.filter((name) => !WRAPPED_TOOL_NAMES.has(name));
+		const unwrapped = allToolNames.filter(
+			(name) => !WRAPPED_TOOL_NAMES.has(name),
+		);
 		const wrappedText = wrapped.length > 0 ? wrapped.join(",") : "none";
 		const unwrappedText = unwrapped.length > 0 ? unwrapped.join(",") : "none";
 		ctx.ui.setStatus(
 			"gondolin",
-			ctx.ui.theme.fg("accent", `Gondolin ready · wrapped:${wrappedText} · native:${unwrappedText}`),
+			ctx.ui.theme.fg(
+				"accent",
+				`Gondolin ready · wrapped:${wrappedText} · native:${unwrappedText}`,
+			),
 		);
 	};
 
@@ -344,8 +362,7 @@ export default function (pi: ExtensionAPI) {
 			try {
 				const startedVm = await starting;
 				if (startedVm !== activeVm) await closeVm(startedVm);
-			} catch {
-			}
+			} catch {}
 		}
 		ctx.ui.setStatus("gondolin", undefined);
 	};
@@ -361,7 +378,10 @@ export default function (pi: ExtensionAPI) {
 			vm = null;
 			vmStarting = null;
 			const reason = err instanceof Error ? err.message : String(err);
-			ctx.ui.setStatus("gondolin", ctx.ui.theme.fg("muted", `Gondolin unavailable (${reason})`));
+			ctx.ui.setStatus(
+				"gondolin",
+				ctx.ui.theme.fg("muted", `Gondolin unavailable (${reason})`),
+			);
 		}
 	};
 
@@ -392,8 +412,10 @@ export default function (pi: ExtensionAPI) {
 
 			let next = sandboxEnabled;
 			if (value === "" || value === "toggle") next = !sandboxEnabled;
-			else if (["on", "enable", "enabled", "true", "1"].includes(value)) next = true;
-			else if (["off", "disable", "disabled", "false", "0"].includes(value)) next = false;
+			else if (["on", "enable", "enabled", "true", "1"].includes(value))
+				next = true;
+			else if (["off", "disable", "disabled", "false", "0"].includes(value))
+				next = false;
 			else {
 				ctx.ui.notify("Usage: /gondolin [on|off|toggle|status]", "info");
 				return;
@@ -411,15 +433,17 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", async (_event, ctx) => {
 		if (!vm && !vmStarting) return;
-		ctx.ui.setStatus("gondolin", ctx.ui.theme.fg("muted", "Gondolin: stopping"));
+		ctx.ui.setStatus(
+			"gondolin",
+			ctx.ui.theme.fg("muted", "Gondolin: stopping"),
+		);
 		if (vm) {
 			await closeVm(vm);
 		} else if (vmStarting) {
 			try {
 				const startedVm = await vmStarting;
 				await closeVm(startedVm);
-			} catch {
-			}
+			} catch {}
 		}
 		vm = null;
 		vmStarting = null;
@@ -428,7 +452,8 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		...localRead,
 		async execute(id, params, signal, onUpdate, ctx) {
-			if (!sandboxEnabled) return localRead.execute(id, params, signal, onUpdate);
+			if (!sandboxEnabled)
+				return localRead.execute(id, params, signal, onUpdate);
 			const activeVm = await ensureVm(ctx);
 			const tool = createReadTool(localCwd, {
 				operations: createGondolinReadOps(activeVm, localCwd),
@@ -436,22 +461,44 @@ export default function (pi: ExtensionAPI) {
 			return tool.execute(id, params, signal, onUpdate);
 		},
 		renderCall(args, theme) {
-			const rawPath = str(args?.file_path ?? args?.path);
+			const readArgs = args as {
+				path?: unknown;
+				file_path?: unknown;
+				offset?: number;
+				limit?: number;
+			};
+			const rawPath = str(readArgs.file_path ?? readArgs.path);
 			const resolvedPath = rawPath !== null ? shortenPath(rawPath) : null;
-			const offset = args?.offset;
-			const limit = args?.limit;
+			const offset = readArgs.offset;
+			const limit = readArgs.limit;
 			const invalidArg = theme.fg("error", "[invalid arg]");
 			let pathDisplay =
-				resolvedPath === null ? invalidArg : resolvedPath ? theme.fg("accent", resolvedPath) : theme.fg("toolOutput", "...");
+				resolvedPath === null
+					? invalidArg
+					: resolvedPath
+						? theme.fg("accent", resolvedPath)
+						: theme.fg("toolOutput", "...");
 			if (offset !== undefined || limit !== undefined) {
 				const startLine = offset ?? 1;
 				const endLine = limit !== undefined ? startLine + limit - 1 : "";
-				pathDisplay += theme.fg("warning", `:${startLine}${endLine ? `-${endLine}` : ""}`);
+				pathDisplay += theme.fg(
+					"warning",
+					`:${startLine}${endLine ? `-${endLine}` : ""}`,
+				);
 			}
-			return new Text(`${theme.fg("toolTitle", theme.bold("read"))} ${pathDisplay}`, 0, 0);
+			return new Text(
+				`${theme.fg("toolTitle", theme.bold("read"))} ${pathDisplay}`,
+				0,
+				0,
+			);
 		},
 		renderResult(result, _options, theme) {
-			const lines = countReadLines(result as any);
+			const lines = countReadLines(
+				result as {
+					content: Array<{ type: string; text?: string }>;
+					details?: { truncation?: { outputLines?: unknown } };
+				},
+			);
 			const label = lines === 1 ? "1 line read" : `${lines} lines read`;
 			return new Text(theme.fg("muted", label), 0, 0);
 		},
@@ -460,7 +507,8 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		...localWrite,
 		async execute(id, params, signal, onUpdate, ctx) {
-			if (!sandboxEnabled) return localWrite.execute(id, params, signal, onUpdate);
+			if (!sandboxEnabled)
+				return localWrite.execute(id, params, signal, onUpdate);
 			const activeVm = await ensureVm(ctx);
 			const tool = createWriteTool(localCwd, {
 				operations: createGondolinWriteOps(activeVm, localCwd),
@@ -468,14 +516,23 @@ export default function (pi: ExtensionAPI) {
 			return tool.execute(id, params, signal, onUpdate);
 		},
 		renderCall(args, theme) {
-			const rawPath = str(args?.file_path ?? args?.path);
+			const writeArgs = args as {
+				path?: unknown;
+				file_path?: unknown;
+				content?: unknown;
+			};
+			const rawPath = str(writeArgs.file_path ?? writeArgs.path);
 			const resolvedPath = rawPath !== null ? shortenPath(rawPath) : null;
-			const fileContent = str(args?.content);
+			const fileContent = str(writeArgs.content);
 			const invalidArg = theme.fg("error", "[invalid arg]");
 			const lineOne =
 				theme.fg("toolTitle", theme.bold("write")) +
 				" " +
-				(resolvedPath === null ? invalidArg : resolvedPath ? theme.fg("accent", resolvedPath) : theme.fg("toolOutput", "..."));
+				(resolvedPath === null
+					? invalidArg
+					: resolvedPath
+						? theme.fg("accent", resolvedPath)
+						: theme.fg("toolOutput", "..."));
 			const lines = fileContent === null ? 0 : countContentLines(fileContent);
 			const label = lines === 1 ? "1 line" : `${lines} lines`;
 			return new Text(`${lineOne}\n${theme.fg("muted", label)}`, 0, 0);
@@ -488,7 +545,8 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		...localEdit,
 		async execute(id, params, signal, onUpdate, ctx) {
-			if (!sandboxEnabled) return localEdit.execute(id, params, signal, onUpdate);
+			if (!sandboxEnabled)
+				return localEdit.execute(id, params, signal, onUpdate);
 			const activeVm = await ensureVm(ctx);
 			const tool = createEditTool(localCwd, {
 				operations: createGondolinEditOps(activeVm, localCwd),
@@ -500,7 +558,8 @@ export default function (pi: ExtensionAPI) {
 	pi.registerTool({
 		...localBash,
 		async execute(id, params, signal, onUpdate) {
-			if (!sandboxEnabled) return localBash.execute(id, params, signal, onUpdate);
+			if (!sandboxEnabled)
+				return localBash.execute(id, params, signal, onUpdate);
 			const tool = createBashTool(localCwd, { operations: bashOps });
 			return tool.execute(id, params, signal, onUpdate);
 		},
@@ -517,7 +576,10 @@ export default function (pi: ExtensionAPI) {
 			await ensureVm(ctx);
 		} catch {
 			sandboxEnabled = false;
-			ctx.ui.setStatus("gondolin", ctx.ui.theme.fg("muted", "Gondolin unavailable (fallback host)"));
+			ctx.ui.setStatus(
+				"gondolin",
+				ctx.ui.theme.fg("muted", "Gondolin unavailable (fallback host)"),
+			);
 			return;
 		}
 		const systemPrompt = event.systemPrompt.replace(

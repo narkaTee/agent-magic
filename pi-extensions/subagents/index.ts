@@ -1,4 +1,4 @@
-import type { Model } from "@mariozechner/pi-ai";
+import type { Api, Model } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
@@ -6,7 +6,9 @@ import { runSubagent, type SubagentToolCall } from "./runner.js";
 
 const ToolParams = Type.Object({
 	prompt: Type.String({ description: "Prompt to send to the subagent" }),
-	cwd: Type.Optional(Type.String({ description: "Working directory for the subagent process" })),
+	cwd: Type.Optional(
+		Type.String({ description: "Working directory for the subagent process" }),
+	),
 });
 
 interface ToolConfig {
@@ -15,7 +17,7 @@ interface ToolConfig {
 	description: string;
 	systemPrompt: string;
 	tools: string[];
-	pickModel: (models: Model<any>[]) => Model<any> | undefined;
+	pickModel: (models: Model<Api>[]) => Model<Api> | undefined;
 }
 
 interface ToolDetails {
@@ -29,7 +31,11 @@ interface ToolDetails {
 	running?: boolean;
 }
 
-function pickModel(models: Model<any>[], exact: string[], includes: string[]): Model<any> | undefined {
+function pickModel(
+	models: Model<Api>[],
+	exact: string[],
+	includes: string[],
+): Model<Api> | undefined {
 	const byId = new Map(models.map((m) => [m.id.toLowerCase(), m]));
 	for (const id of exact) {
 		const match = byId.get(id.toLowerCase());
@@ -48,9 +54,14 @@ function pickModel(models: Model<any>[], exact: string[], includes: string[]): M
 	return undefined;
 }
 
-function getText(result: { content: Array<{ type: string; text?: string }> }): string {
+function getText(result: {
+	content: Array<{ type: string; text?: string }>;
+}): string {
 	return result.content
-		.filter((part): part is { type: "text"; text: string } => part.type === "text" && typeof part.text === "string")
+		.filter(
+			(part): part is { type: "text"; text: string } =>
+				part.type === "text" && typeof part.text === "string",
+		)
 		.map((part) => part.text)
 		.join("\n")
 		.trim();
@@ -90,9 +101,12 @@ Output format:
 4) Overall assessment`;
 
 function registerSubagentTool(pi: ExtensionAPI, config: ToolConfig) {
-	let cachedAvailableModels: Model<any>[] = [];
-	const selectModel = (models: Model<any>[]) => config.pickModel(models) || models[0];
-	const refreshAvailableModels = (ctx: { modelRegistry: { getAvailable(): Model<any>[] } }) => {
+	let cachedAvailableModels: Model<Api>[] = [];
+	const selectModel = (models: Model<Api>[]) =>
+		config.pickModel(models) || models[0];
+	const refreshAvailableModels = (ctx: {
+		modelRegistry: { getAvailable(): Model<Api>[] };
+	}) => {
 		cachedAvailableModels = ctx.modelRegistry.getAvailable();
 	};
 
@@ -111,7 +125,12 @@ function registerSubagentTool(pi: ExtensionAPI, config: ToolConfig) {
 				return {
 					isError: true,
 					content: [{ type: "text", text: "Prompt is required." }],
-					details: { tool: config.name, prompt: "", exitCode: 1, toolCalls: [] } as ToolDetails,
+					details: {
+						tool: config.name,
+						prompt: "",
+						exitCode: 1,
+						toolCalls: [],
+					} as ToolDetails,
 				};
 			}
 
@@ -121,8 +140,18 @@ function registerSubagentTool(pi: ExtensionAPI, config: ToolConfig) {
 			if (!selectedModel) {
 				return {
 					isError: true,
-					content: [{ type: "text", text: "No models available from authenticated providers." }],
-					details: { tool: config.name, prompt, exitCode: 1, toolCalls: [] } as ToolDetails,
+					content: [
+						{
+							type: "text",
+							text: "No models available from authenticated providers.",
+						},
+					],
+					details: {
+						tool: config.name,
+						prompt,
+						exitCode: 1,
+						toolCalls: [],
+					} as ToolDetails,
 				};
 			}
 
@@ -136,7 +165,10 @@ function registerSubagentTool(pi: ExtensionAPI, config: ToolConfig) {
 				toolCalls: [],
 				running: true,
 			};
-			onUpdate?.({ content: [{ type: "text", text: "(starting...)" }], details: baseDetails });
+			onUpdate?.({
+				content: [{ type: "text", text: "(starting...)" }],
+				details: baseDetails,
+			});
 
 			try {
 				const run = await runSubagent({
@@ -149,7 +181,9 @@ function registerSubagentTool(pi: ExtensionAPI, config: ToolConfig) {
 					onProgress: onUpdate
 						? (state) => {
 								onUpdate({
-									content: [{ type: "text", text: state.text || "(running...)" }],
+									content: [
+										{ type: "text", text: state.text || "(running...)" },
+									],
 									details: {
 										...baseDetails,
 										model: state.model ?? selectedModelRef,
@@ -157,14 +191,23 @@ function registerSubagentTool(pi: ExtensionAPI, config: ToolConfig) {
 										toolCalls: state.toolCalls,
 									},
 								});
-						  }
+							}
 						: undefined,
 				});
 
-				const isError = run.exitCode !== 0 || run.stopReason === "error" || run.stopReason === "aborted";
+				const isError =
+					run.exitCode !== 0 ||
+					run.stopReason === "error" ||
+					run.stopReason === "aborted";
 				const text = isError
-					? run.errorMessage || run.stderr.trim() || run.finalText || "(no output)"
-					: run.finalText || run.errorMessage || run.stderr.trim() || "(no output)";
+					? run.errorMessage ||
+						run.stderr.trim() ||
+						run.finalText ||
+						"(no output)"
+					: run.finalText ||
+						run.errorMessage ||
+						run.stderr.trim() ||
+						"(no output)";
 				const details: ToolDetails = {
 					tool: config.name,
 					prompt,
@@ -177,7 +220,8 @@ function registerSubagentTool(pi: ExtensionAPI, config: ToolConfig) {
 				};
 				return { isError, content: [{ type: "text", text }], details };
 			} catch (error) {
-				const message = error instanceof Error ? error.message : "Subagent failed";
+				const message =
+					error instanceof Error ? error.message : "Subagent failed";
 				const isAborted = message.toLowerCase().includes("aborted");
 				return {
 					isError: true,
@@ -193,7 +237,9 @@ function registerSubagentTool(pi: ExtensionAPI, config: ToolConfig) {
 		},
 		renderCall(args, theme) {
 			const detectedModel = selectModel(cachedAvailableModels);
-			const modelLabel = detectedModel ? `[${detectedModel.provider}/${detectedModel.id}]` : "";
+			const modelLabel = detectedModel
+				? `[${detectedModel.provider}/${detectedModel.id}]`
+				: "";
 			const text =
 				theme.fg("toolTitle", theme.bold(`${config.name} `)) +
 				theme.fg("muted", modelLabel) +
@@ -203,10 +249,14 @@ function registerSubagentTool(pi: ExtensionAPI, config: ToolConfig) {
 		},
 		renderResult(result, { expanded, isPartial }, theme) {
 			const details = result.details as ToolDetails | undefined;
-			const prompt = details?.prompt ?? "";
-			const outputText = getText(result as { content: Array<{ type: string; text?: string }> }) || "(no output)";
+			const outputText =
+				getText(
+					result as { content: Array<{ type: string; text?: string }> },
+				) || "(no output)";
 			const outputLines = outputText.split("\n");
-			const shownOutput = expanded ? outputText : outputLines.slice(0, 10).join("\n");
+			const shownOutput = expanded
+				? outputText
+				: outputLines.slice(0, 10).join("\n");
 			const toolCalls = details?.toolCalls ?? [];
 			const shownToolCalls = expanded ? toolCalls : toolCalls.slice(-6);
 
@@ -223,17 +273,26 @@ function registerSubagentTool(pi: ExtensionAPI, config: ToolConfig) {
 					lines.push(theme.fg("dim", `  → ${formatToolCall(toolCall)}`));
 				}
 				if (!expanded && toolCalls.length > shownToolCalls.length) {
-					lines.push(theme.fg("dim", `  ... ${toolCalls.length - shownToolCalls.length} more`));
+					lines.push(
+						theme.fg(
+							"dim",
+							`  ... ${toolCalls.length - shownToolCalls.length} more`,
+						),
+					);
 				}
 			}
 
-			if (result.isError) {
+			const isError = Boolean((result as { isError?: boolean }).isError);
+			if (isError) {
 				lines.push(theme.fg("error", shownOutput));
 			} else {
 				lines.push(shownOutput);
 			}
 
-			if (!expanded && (outputLines.length > 10 || toolCalls.length > shownToolCalls.length)) {
+			if (
+				!expanded &&
+				(outputLines.length > 10 || toolCalls.length > shownToolCalls.length)
+			) {
 				lines.push(theme.fg("dim", "(Ctrl+O to expand)"));
 			}
 
@@ -258,7 +317,7 @@ export default function (pi: ExtensionAPI) {
 					"claude-haiku-4-5",
 					"claude-haiku-4.5",
 					"gemini-2.5-flash",
-					"gpt-5.3-codex-spark"
+					"gpt-5.3-codex-spark",
 				],
 				["haiku", "flash", "mini", "fast"],
 			),

@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { BorderedLoader, type ExecResult, type ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import {
+	BorderedLoader,
+	type ExecResult,
+	type ExtensionAPI,
+} from "@mariozechner/pi-coding-agent";
 
 type GistFile = {
 	filename?: string;
@@ -23,7 +27,11 @@ type SessionExportData = {
 };
 
 function trimOutput(result: ExecResult): string {
-	const text = (result.stderr || result.stdout || `exit code ${result.code}`).trim();
+	const text = (
+		result.stderr ||
+		result.stdout ||
+		`exit code ${result.code}`
+	).trim();
 	return text || `exit code ${result.code}`;
 }
 
@@ -59,8 +67,7 @@ function extractGistId(input: string): string | undefined {
 		for (const part of parts) {
 			if (isLikelyGistId(part)) return part;
 		}
-	} catch {
-	}
+	} catch {}
 
 	const matches = value.match(/[0-9a-f]{8,}/gi);
 	if (!matches || matches.length === 0) return undefined;
@@ -75,7 +82,9 @@ function formatDate(value?: string): string {
 }
 
 function buildSessionJsonl(html: string): string {
-	const match = html.match(/<script[^>]*id=["']session-data["'][^>]*>([\s\S]*?)<\/script>/i);
+	const match = html.match(
+		/<script[^>]*id=["']session-data["'][^>]*>([\s\S]*?)<\/script>/i,
+	);
 	if (!match) {
 		throw new Error("session-data block not found in session.html");
 	}
@@ -105,7 +114,11 @@ function buildSessionJsonl(html: string): string {
 	return `${lines.join("\n")}\n`;
 }
 
-function makeOutputPath(currentSessionFile: string | undefined, cwd: string, gistId: string): string {
+function makeOutputPath(
+	currentSessionFile: string | undefined,
+	cwd: string,
+	gistId: string,
+): string {
 	const targetDir = currentSessionFile ? path.dirname(currentSessionFile) : cwd;
 	fs.mkdirSync(targetDir, { recursive: true });
 
@@ -121,13 +134,20 @@ function makeOutputPath(currentSessionFile: string | undefined, cwd: string, gis
 	return path.join(targetDir, `${baseName}-${Date.now()}.jsonl`);
 }
 
-async function ensureGhReady(pi: ExtensionAPI, cwd: string): Promise<string | undefined> {
+async function ensureGhReady(
+	pi: ExtensionAPI,
+	cwd: string,
+): Promise<string | undefined> {
 	const version = await pi.exec("gh", ["--version"], { cwd });
 	if (version.code !== 0) {
 		return `GitHub CLI (gh) not found: ${trimOutput(version)}`;
 	}
 
-	const auth = await pi.exec("gh", ["auth", "status", "--hostname", "github.com"], { cwd });
+	const auth = await pi.exec(
+		"gh",
+		["auth", "status", "--hostname", "github.com"],
+		{ cwd },
+	);
 	if (auth.code !== 0) {
 		return "GitHub CLI is not logged in. Run /ghlogin (or gh auth login).";
 	}
@@ -135,10 +155,21 @@ async function ensureGhReady(pi: ExtensionAPI, cwd: string): Promise<string | un
 	return undefined;
 }
 
-async function listSessionGists(pi: ExtensionAPI, cwd: string, signal?: AbortSignal): Promise<Gist[]> {
-	let result = await pi.exec("gh", ["api", "--paginate", "--slurp", "/gists?per_page=100"], { cwd, signal });
+async function listSessionGists(
+	pi: ExtensionAPI,
+	cwd: string,
+	signal?: AbortSignal,
+): Promise<Gist[]> {
+	let result = await pi.exec(
+		"gh",
+		["api", "--paginate", "--slurp", "/gists?per_page=100"],
+		{ cwd, signal },
+	);
 	if (result.code !== 0) {
-		result = await pi.exec("gh", ["api", "/gists?per_page=100"], { cwd, signal });
+		result = await pi.exec("gh", ["api", "/gists?per_page=100"], {
+			cwd,
+			signal,
+		});
 		if (result.code !== 0) {
 			throw new Error(`Failed to list gists: ${trimOutput(result)}`);
 		}
@@ -170,7 +201,11 @@ async function listSessionGists(pi: ExtensionAPI, cwd: string, signal?: AbortSig
 		});
 }
 
-async function downloadSessionHtmlFromGist(pi: ExtensionAPI, cwd: string, gistId: string): Promise<string> {
+async function downloadSessionHtmlFromGist(
+	pi: ExtensionAPI,
+	cwd: string,
+	gistId: string,
+): Promise<string> {
 	const gistResult = await pi.exec("gh", ["api", `/gists/${gistId}`], { cwd });
 	if (gistResult.code !== 0) {
 		throw new Error(`Failed to load gist ${gistId}: ${trimOutput(gistResult)}`);
@@ -208,8 +243,17 @@ async function downloadSessionHtmlFromGist(pi: ExtensionAPI, cwd: string, gistId
 	return await response.text();
 }
 
-async function deleteGist(pi: ExtensionAPI, cwd: string, gistId: string, signal?: AbortSignal): Promise<void> {
-	const result = await pi.exec("gh", ["api", "-X", "DELETE", `/gists/${gistId}`], { cwd, signal });
+async function deleteGist(
+	pi: ExtensionAPI,
+	cwd: string,
+	gistId: string,
+	signal?: AbortSignal,
+): Promise<void> {
+	const result = await pi.exec(
+		"gh",
+		["api", "-X", "DELETE", `/gists/${gistId}`],
+		{ cwd, signal },
+	);
 	if (result.code !== 0) {
 		throw new Error(`Failed to delete gist ${gistId}: ${trimOutput(result)}`);
 	}
@@ -239,7 +283,11 @@ export default function (pi: ExtensionAPI) {
 					| { ok: false; cancelled: true }
 					| { ok: false; cancelled?: false; error: string }
 				>((tui, theme, _kb, done) => {
-					const loader = new BorderedLoader(tui, theme, "Loading session gists...");
+					const loader = new BorderedLoader(
+						tui,
+						theme,
+						"Loading session gists...",
+					);
 					const controller = new AbortController();
 					let finished = false;
 
@@ -268,18 +316,21 @@ export default function (pi: ExtensionAPI) {
 							}
 							finish({
 								ok: false,
-								error: error instanceof Error ? error.message : "Failed to list gists",
+								error:
+									error instanceof Error
+										? error.message
+										: "Failed to list gists",
 							});
 						});
 
 					return loader;
 				});
 
-				if (!listResult.ok) {
-					if (!listResult.cancelled) {
-						ctx.ui.notify(listResult.error, "error");
-					} else {
+				if (listResult.ok === false) {
+					if ("cancelled" in listResult && listResult.cancelled) {
 						ctx.ui.notify("Import cancelled", "info");
+					} else if ("error" in listResult) {
+						ctx.ui.notify(listResult.error, "error");
 					}
 					return;
 				}
@@ -296,7 +347,10 @@ export default function (pi: ExtensionAPI) {
 					return `${gist.id} · ${formatDate(gist.updated_at || gist.created_at)}${descriptionSuffix}`;
 				});
 
-				const selected = await ctx.ui.select("Import shared session from gist", options);
+				const selected = await ctx.ui.select(
+					"Import shared session from gist",
+					options,
+				);
 				if (!selected) {
 					ctx.ui.notify("Import cancelled", "info");
 					return;
@@ -308,7 +362,10 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			if (!gistId) {
-				ctx.ui.notify("Could not extract gist ID. Use /import <gist-id-or-url>", "error");
+				ctx.ui.notify(
+					"Could not extract gist ID. Use /import <gist-id-or-url>",
+					"error",
+				);
 				return;
 			}
 
@@ -316,7 +373,10 @@ export default function (pi: ExtensionAPI) {
 			try {
 				html = await downloadSessionHtmlFromGist(pi, ctx.cwd, gistId);
 			} catch (error) {
-				ctx.ui.notify(error instanceof Error ? error.message : "Failed to download session", "error");
+				ctx.ui.notify(
+					error instanceof Error ? error.message : "Failed to download session",
+					"error",
+				);
 				return;
 			}
 
@@ -324,29 +384,45 @@ export default function (pi: ExtensionAPI) {
 			try {
 				jsonl = buildSessionJsonl(html);
 			} catch (error) {
-				ctx.ui.notify(error instanceof Error ? error.message : "Failed to extract session", "error");
-				return;
-			}
-
-			const outputPath = makeOutputPath(ctx.sessionManager.getSessionFile(), ctx.cwd, gistId);
-			try {
-				fs.writeFileSync(outputPath, jsonl, "utf8");
-			} catch (error) {
 				ctx.ui.notify(
-					error instanceof Error ? `Failed to write session file: ${error.message}` : "Failed to write session file",
+					error instanceof Error ? error.message : "Failed to extract session",
 					"error",
 				);
 				return;
 			}
 
-			const deleteChoice = await ctx.ui.select(`Imported to ${outputPath}\nDelete gist ${gistId}?`, ["No", "Yes"]);
+			const outputPath = makeOutputPath(
+				ctx.sessionManager.getSessionFile(),
+				ctx.cwd,
+				gistId,
+			);
+			try {
+				fs.writeFileSync(outputPath, jsonl, "utf8");
+			} catch (error) {
+				ctx.ui.notify(
+					error instanceof Error
+						? `Failed to write session file: ${error.message}`
+						: "Failed to write session file",
+					"error",
+				);
+				return;
+			}
+
+			const deleteChoice = await ctx.ui.select(
+				`Imported to ${outputPath}\nDelete gist ${gistId}?`,
+				["No", "Yes"],
+			);
 			if (deleteChoice === "Yes") {
 				const deletion = await ctx.ui.custom<
 					| { ok: true }
 					| { ok: false; cancelled: true }
 					| { ok: false; cancelled?: false; error: string }
 				>((tui, theme, _kb, done) => {
-					const loader = new BorderedLoader(tui, theme, `Deleting gist ${gistId}...`);
+					const loader = new BorderedLoader(
+						tui,
+						theme,
+						`Deleting gist ${gistId}...`,
+					);
 					const controller = new AbortController();
 					let finished = false;
 
@@ -375,7 +451,10 @@ export default function (pi: ExtensionAPI) {
 							}
 							finish({
 								ok: false,
-								error: error instanceof Error ? error.message : "Failed to delete gist",
+								error:
+									error instanceof Error
+										? error.message
+										: "Failed to delete gist",
 							});
 						});
 
@@ -384,11 +463,13 @@ export default function (pi: ExtensionAPI) {
 
 				if (deletion.ok) {
 					ctx.ui.notify(`Deleted gist ${gistId}`, "info");
-				} else if (!deletion.cancelled) {
+				} else if (!("cancelled" in deletion && deletion.cancelled)) {
+					const errorMessage =
+						"error" in deletion ? deletion.error : "Failed to delete gist";
 					let acknowledged = false;
 					while (!acknowledged) {
 						const ack = await ctx.ui.select(
-							`Failed to delete gist ${gistId}.\n${deletion.error}\nPlease delete it manually.`,
+							`Failed to delete gist ${gistId}.\n${errorMessage}\nPlease delete it manually.`,
 							["OK"],
 						);
 						acknowledged = ack === "OK";
