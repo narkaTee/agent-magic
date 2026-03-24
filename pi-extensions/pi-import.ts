@@ -260,11 +260,11 @@ async function deleteGist(
 }
 
 export default function (pi: ExtensionAPI) {
-	pi.registerCommand("import", {
+	pi.registerCommand("pi-import", {
 		description: "Import a shared session from a GitHub gist",
 		handler: async (args, ctx) => {
 			if (!ctx.hasUI) {
-				ctx.ui.notify("/import requires interactive mode", "error");
+				ctx.ui.notify("/pi-import requires interactive mode", "error");
 				return;
 			}
 
@@ -363,7 +363,7 @@ export default function (pi: ExtensionAPI) {
 
 			if (!gistId) {
 				ctx.ui.notify(
-					"Could not extract gist ID. Use /import <gist-id-or-url>",
+					"Could not extract gist ID. Use /pi-import <gist-id-or-url>",
 					"error",
 				);
 				return;
