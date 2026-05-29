@@ -86,20 +86,6 @@ Output format:
 2) Relevant files with why each matters
 3) Suggested next checks`;
 
-const REVIEW_SYSTEM_PROMPT = `You are Review, a senior code review subagent.
-
-Rules:
-- Focus on correctness, maintainability, readability and security.
-- Provide concrete issues with file paths and line references when possible.
-- Use bash only for read-only git inspection (diff/log/show).
-- Never modify files.
-
-Output format:
-1) Critical issues
-2) Warnings
-3) Suggestions
-4) Overall assessment`;
-
 function registerSubagentTool(pi: ExtensionAPI, config: ToolConfig) {
 	let cachedAvailableModels: Model<Api>[] = [];
 	const selectModel = (models: Model<Api>[]) =>
@@ -320,28 +306,6 @@ export default function (pi: ExtensionAPI) {
 					"gpt-5.3-codex-spark",
 				],
 				["haiku", "flash", "mini", "fast"],
-			),
-	});
-
-	registerSubagentTool(pi, {
-		name: "review",
-		label: "Review",
-		description:
-			"Run a code-review subagent with isolated context. Use when the user requests review/validation. Provide a concise summary of intended changes in the prompt.",
-		systemPrompt: REVIEW_SYSTEM_PROMPT,
-		tools: ["read", "grep", "find", "ls", "bash"],
-		pickModel: (models) =>
-			pickModel(
-				models,
-				[
-					"gpt-5.3-codex",
-					"claude-opus-4-6",
-					"claude-opus-4.6",
-					"gemini-3-pro-preview",
-					"claude-sonnet-4-5",
-					"claude-sonnet-4.5",
-				],
-				["sonnet", "gpt-5.3", "gemini"],
 			),
 	});
 }
