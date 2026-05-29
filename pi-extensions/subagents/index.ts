@@ -2,33 +2,30 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { type AgentConfig, discoverAgents, formatAgentList } from "./agents.js";
 import { runSubagent, type SubagentToolCall } from "./runner.js";
 
 const ToolParams = Type.Object({
-	prompt: Type.String({ description: "Prompt to send to the subagent" }),
+	agent: Type.String({
+		description: "Name of the subagent to invoke, e.g. scout",
+	}),
+	task: Type.String({ description: "Task to delegate to the subagent" }),
 	cwd: Type.Optional(
 		Type.String({ description: "Working directory for the subagent process" }),
 	),
 });
 
-interface ToolConfig {
-	name: string;
-	label: string;
-	description: string;
-	systemPrompt: string;
-	tools: string[];
-	pickModel: (models: Model<Api>[]) => Model<Api> | undefined;
-}
-
 interface ToolDetails {
-	tool: string;
-	prompt: string;
+	agent: string;
+	agentSource?: AgentConfig["source"];
+	task: string;
 	model?: string;
 	exitCode: number;
 	stopReason?: string;
 	stderr?: string;
 	toolCalls: SubagentToolCall[];
 	running?: boolean;
+	availableAgents?: string;
 }
 
 function pickModel(
@@ -36,22 +33,41 @@ function pickModel(
 	exact: string[],
 	includes: string[],
 ): Model<Api> | undefined {
-	const byId = new Map(models.map((m) => [m.id.toLowerCase(), m]));
+	const byId = new Map(models.map((model) => [model.id.toLowerCase(), model]));
 	for (const id of exact) {
 		const match = byId.get(id.toLowerCase());
 		if (match) return match;
 	}
 	for (const pattern of includes) {
-		const p = pattern.toLowerCase();
+		const lowerPattern = pattern.toLowerCase();
 		const match = models.find(
-			(m) =>
-				m.id.toLowerCase().includes(p) ||
-				m.name.toLowerCase().includes(p) ||
-				`${m.provider}/${m.id}`.toLowerCase().includes(p),
+			(model) =>
+				model.id.toLowerCase().includes(lowerPattern) ||
+				model.name.toLowerCase().includes(lowerPattern) ||
+				`${model.provider}/${model.id}`.toLowerCase().includes(lowerPattern),
 		);
 		if (match) return match;
 	}
 	return undefined;
+}
+
+function resolveModel(
+	model: string | undefined,
+	models: Model<Api>[],
+): string | undefined {
+	if (!model || model !== "auto-fast") return model;
+	const selected = pickModel(
+		models,
+		[
+			"gemini-3-flash-preview",
+			"claude-haiku-4-5",
+			"claude-haiku-4.5",
+			"gemini-2.5-flash",
+			"gpt-5.4-mini",
+		],
+		["haiku", "flash", "mini", "fast"],
+	);
+	return selected ? `${selected.provider}/${selected.id}` : undefined;
 }
 
 function getText(result: {
@@ -73,78 +89,69 @@ function formatToolCall(toolCall: SubagentToolCall): string {
 	return `${toolCall.name} ${preview}`;
 }
 
-const SCOUT_SYSTEM_PROMPT = `You are Scout, a fast codebase reconnaissance subagent.
-
-Rules:
-- Explore quickly and accurately.
-- Use only read-only tooling.
-- Never edit files.
-- Prefer grep/find first, then read targeted ranges.
-
-Output format:
-1) Key findings
-2) Relevant files with why each matters
-3) Suggested next checks`;
-
-function registerSubagentTool(pi: ExtensionAPI, config: ToolConfig) {
-	let cachedAvailableModels: Model<Api>[] = [];
-	const selectModel = (models: Model<Api>[]) =>
-		config.pickModel(models) || models[0];
-	const refreshAvailableModels = (ctx: {
-		modelRegistry: { getAvailable(): Model<Api>[] };
-	}) => {
-		cachedAvailableModels = ctx.modelRegistry.getAvailable();
-	};
-
-	pi.on("session_start", async (_event, ctx) => refreshAvailableModels(ctx));
+export default function (pi: ExtensionAPI) {
+	pi.on("session_start", async (_event, ctx) => {
+		const discovery = discoverAgents(ctx.cwd);
+		const summary = formatAgentList(discovery.agents);
+		ctx.ui.notify(`Subagents available:\n${summary || "none"}`, "info");
+	});
 
 	pi.registerTool({
-		name: config.name,
-		label: config.label,
-		description: config.description,
+		name: "subagent",
+		label: "Subagent",
+		description:
+			"Delegate a task to a named subagent with isolated context. Built-in scout is available by default; user agents can be added as markdown files in ~/.pi/agent/agents.",
 		parameters: ToolParams,
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const prompt = params.prompt.trim();
-			if (!prompt) {
+			const task = params.task.trim();
+			const discovery = discoverAgents(ctx.cwd);
+			const availableAgents = formatAgentList(discovery.agents);
+			const agent = discovery.agents.find(
+				(candidate) => candidate.name === params.agent,
+			);
+
+			if (!task) {
 				return {
 					isError: true,
-					content: [{ type: "text", text: "Prompt is required." }],
+					content: [{ type: "text", text: "Task is required." }],
 					details: {
-						tool: config.name,
-						prompt: "",
+						agent: params.agent,
+						task,
 						exitCode: 1,
 						toolCalls: [],
+						availableAgents,
 					} as ToolDetails,
 				};
 			}
 
-			const availableModels = ctx.modelRegistry.getAvailable();
-			cachedAvailableModels = availableModels;
-			const selectedModel = selectModel(availableModels);
-			if (!selectedModel) {
+			if (!agent) {
 				return {
 					isError: true,
 					content: [
 						{
 							type: "text",
-							text: "No models available from authenticated providers.",
+							text: `Unknown subagent: ${params.agent}\n\nAvailable agents:\n${availableAgents || "none"}`,
 						},
 					],
 					details: {
-						tool: config.name,
-						prompt,
+						agent: params.agent,
+						task,
 						exitCode: 1,
 						toolCalls: [],
+						availableAgents,
 					} as ToolDetails,
 				};
 			}
 
-			const selectedModelRef = `${selectedModel.provider}/${selectedModel.id}`;
-
+			const selectedModel = resolveModel(
+				agent.model,
+				ctx.modelRegistry.getAvailable(),
+			);
 			const baseDetails: ToolDetails = {
-				tool: config.name,
-				prompt,
-				model: selectedModelRef,
+				agent: agent.name,
+				agentSource: agent.source,
+				task,
+				model: selectedModel,
 				exitCode: -1,
 				toolCalls: [],
 				running: true,
@@ -157,10 +164,10 @@ function registerSubagentTool(pi: ExtensionAPI, config: ToolConfig) {
 			try {
 				const run = await runSubagent({
 					cwd: params.cwd ?? ctx.cwd,
-					task: prompt,
-					systemPrompt: config.systemPrompt,
-					model: selectedModelRef,
-					tools: config.tools,
+					task,
+					systemPrompt: agent.systemPrompt,
+					model: selectedModel,
+					tools: agent.tools,
 					signal,
 					onProgress: onUpdate
 						? (state) => {
@@ -170,7 +177,7 @@ function registerSubagentTool(pi: ExtensionAPI, config: ToolConfig) {
 									],
 									details: {
 										...baseDetails,
-										model: state.model ?? selectedModelRef,
+										model: state.model ?? selectedModel,
 										stopReason: state.stopReason,
 										toolCalls: state.toolCalls,
 									},
@@ -193,9 +200,10 @@ function registerSubagentTool(pi: ExtensionAPI, config: ToolConfig) {
 						run.stderr.trim() ||
 						"(no output)";
 				const details: ToolDetails = {
-					tool: config.name,
-					prompt,
-					model: run.model ?? selectedModelRef,
+					agent: agent.name,
+					agentSource: agent.source,
+					task,
+					model: run.model ?? selectedModel,
 					exitCode: run.exitCode,
 					stopReason: run.stopReason,
 					stderr: run.stderr.trim() || undefined,
@@ -206,29 +214,26 @@ function registerSubagentTool(pi: ExtensionAPI, config: ToolConfig) {
 			} catch (error) {
 				const message =
 					error instanceof Error ? error.message : "Subagent failed";
-				const isAborted = message.toLowerCase().includes("aborted");
 				return {
 					isError: true,
 					content: [{ type: "text", text: message }],
 					details: {
 						...baseDetails,
 						exitCode: 1,
-						stopReason: isAborted ? "aborted" : "error",
+						stopReason: message.toLowerCase().includes("aborted")
+							? "aborted"
+							: "error",
 						running: false,
-					},
+					} as ToolDetails,
 				};
 			}
 		},
 		renderCall(args, theme) {
-			const detectedModel = selectModel(cachedAvailableModels);
-			const modelLabel = detectedModel
-				? `[${detectedModel.provider}/${detectedModel.id}]`
-				: "";
 			const text =
-				theme.fg("toolTitle", theme.bold(`${config.name} `)) +
-				theme.fg("muted", modelLabel) +
+				theme.fg("toolTitle", theme.bold("subagent ")) +
+				theme.fg("accent", args.agent || "...") +
 				"\n" +
-				theme.fg("dim", args.prompt);
+				theme.fg("dim", args.task || "...");
 			return new Text(text, 0, 0);
 		},
 		renderResult(result, { expanded, isPartial }, theme) {
@@ -243,67 +248,41 @@ function registerSubagentTool(pi: ExtensionAPI, config: ToolConfig) {
 				: outputLines.slice(0, 10).join("\n");
 			const toolCalls = details?.toolCalls ?? [];
 			const shownToolCalls = expanded ? toolCalls : toolCalls.slice(-6);
-
 			const lines: string[] = [];
-			let header = "";
-			if (details?.running || isPartial) {
-				header += (header ? " " : "") + theme.fg("warning", "⏳");
+			const isError = Boolean((result as { isError?: boolean }).isError);
+
+			const status =
+				details?.running || isPartial
+					? theme.fg("warning", "⏳")
+					: isError
+						? theme.fg("error", "✗")
+						: theme.fg("success", "✓");
+			if (details) {
+				lines.push(
+					`${status} ${theme.fg("toolTitle", theme.bold(details.agent))}${details.agentSource ? theme.fg("muted", ` (${details.agentSource})`) : ""}${details.model ? theme.fg("dim", ` ${details.model}`) : ""}`,
+				);
 			}
-			if (header) lines.push(header);
 
 			if (shownToolCalls.length > 0) {
 				lines.push(theme.fg("muted", `🔧 calls (${toolCalls.length}):`));
-				for (const toolCall of shownToolCalls) {
+				for (const toolCall of shownToolCalls)
 					lines.push(theme.fg("dim", `  → ${formatToolCall(toolCall)}`));
-				}
-				if (!expanded && toolCalls.length > shownToolCalls.length) {
+				if (!expanded && toolCalls.length > shownToolCalls.length)
 					lines.push(
 						theme.fg(
 							"dim",
 							`  ... ${toolCalls.length - shownToolCalls.length} more`,
 						),
 					);
-				}
 			}
 
-			const isError = Boolean((result as { isError?: boolean }).isError);
-			if (isError) {
-				lines.push(theme.fg("error", shownOutput));
-			} else {
-				lines.push(shownOutput);
-			}
-
+			lines.push(isError ? theme.fg("error", shownOutput) : shownOutput);
 			if (
 				!expanded &&
 				(outputLines.length > 10 || toolCalls.length > shownToolCalls.length)
-			) {
+			)
 				lines.push(theme.fg("dim", "(Ctrl+O to expand)"));
-			}
-
 			return new Text(lines.join("\n"), 0, 0);
 		},
-	});
-}
-
-export default function (pi: ExtensionAPI) {
-	registerSubagentTool(pi, {
-		name: "scout",
-		label: "Scout",
-		description:
-			"Run a fast exploration subagent with isolated context. Use for quick codebase discovery (files, call paths, dependencies, ownership). Skip for small, local, obvious changes.",
-		systemPrompt: SCOUT_SYSTEM_PROMPT,
-		tools: ["read", "grep", "find", "ls"],
-		pickModel: (models) =>
-			pickModel(
-				models,
-				[
-					"gemini-3-flash-preview",
-					"claude-haiku-4-5",
-					"claude-haiku-4.5",
-					"gemini-2.5-flash",
-					"gpt-5.3-codex-spark",
-				],
-				["haiku", "flash", "mini", "fast"],
-			),
 	});
 }
