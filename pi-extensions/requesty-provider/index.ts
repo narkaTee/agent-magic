@@ -5,7 +5,7 @@ import * as path from "node:path";
 import type {
 	ExtensionAPI,
 	ExtensionCommandContext,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 const BASE_URL = "https://router.eu.requesty.ai/v1";
 const DEFAULT_CONTEXT_WINDOW = 128000;

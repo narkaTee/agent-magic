@@ -1,7 +1,7 @@
-import type { Api, Model } from "@mariozechner/pi-ai";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
-import { Type } from "@sinclair/typebox";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
+import { Type } from "typebox";
 import { runSubagent, type SubagentToolCall } from "./runner.js";
 
 const ToolParams = Type.Object({
@@ -97,8 +97,6 @@ function registerSubagentTool(pi: ExtensionAPI, config: ToolConfig) {
 	};
 
 	pi.on("session_start", async (_event, ctx) => refreshAvailableModels(ctx));
-	pi.on("session_switch", async (_event, ctx) => refreshAvailableModels(ctx));
-	pi.on("session_fork", async (_event, ctx) => refreshAvailableModels(ctx));
 
 	pi.registerTool({
 		name: config.name,

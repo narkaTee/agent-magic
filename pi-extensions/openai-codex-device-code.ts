@@ -4,9 +4,9 @@ import {
 	type Model,
 	type OAuthCredentials,
 	type OAuthLoginCallbacks,
-	refreshOpenAICodexToken,
-} from "@mariozechner/pi-ai";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-ai";
+import { refreshOpenAICodexToken } from "@earendil-works/pi-ai/oauth";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const DEFAULT_BASE_URL = "https://chatgpt.com/backend-api";
 const AUTH_ISSUER = "https://auth.openai.com";

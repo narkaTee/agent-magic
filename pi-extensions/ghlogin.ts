@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExecResult, ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExecResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const WRAPPER_RELATIVE_PATH = path.join("skills", "github", "gh-app-auth");
 const AUTH_FILE = path.join(os.homedir(), ".config", "gh", "wrapper-auth.json");

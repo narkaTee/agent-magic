@@ -8,12 +8,12 @@ import {
 	formatSize,
 	type TruncationResult,
 	truncateHead,
-} from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import { Readability } from "@mozilla/readability";
-import { Type } from "@sinclair/typebox";
 import { JSDOM } from "jsdom";
 import TurndownService from "turndown";
+import { Type } from "typebox";
 
 const BRAVE_SEARCH_ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
 const DEFAULT_SEARCH_COUNT = 10;

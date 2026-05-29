@@ -26,14 +26,14 @@ import type {
 	ExtensionContext,
 	ReadOperations,
 	WriteOperations,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import {
 	createBashTool,
 	createEditTool,
 	createReadTool,
 	createWriteTool,
-} from "@mariozechner/pi-coding-agent";
-import { Text } from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 
 const GUEST_WORKSPACE = "/workspace";
 const WRAPPED_TOOL_NAMES = new Set(["read", "write", "edit", "bash"]);

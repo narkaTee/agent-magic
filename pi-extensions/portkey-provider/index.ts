@@ -7,7 +7,7 @@
  *   PORTKEY_API_KEY=your-key pi
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	type ApiType,
 	PORTKEY_MODELS,
