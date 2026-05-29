@@ -10,9 +10,12 @@ import {
 } from "./runner.js";
 
 const ToolParams = Type.Object({
-	agent: Type.String({
-		description: "Name of the subagent to invoke, e.g. scout",
-	}),
+	agent: Type.Optional(
+		Type.String({
+			description:
+				"Name of the subagent to invoke, e.g. scout. Omit for an ad-hoc isolated pi agent.",
+		}),
+	),
 	task: Type.String({ description: "Task to delegate to the subagent" }),
 	cwd: Type.Optional(
 		Type.String({ description: "Working directory for the subagent process" }),
@@ -21,7 +24,7 @@ const ToolParams = Type.Object({
 
 interface ToolDetails {
 	agent: string;
-	agentSource?: AgentConfig["source"];
+	agentSource?: AgentConfig["source"] | "adhoc";
 	task: string;
 	model?: string;
 	exitCode: number;
@@ -160,22 +163,22 @@ export default function (pi: ExtensionAPI) {
 		name: "subagent",
 		label: "Subagent",
 		description:
-			"Delegate a task to a named subagent with isolated context. Choose agents by their descriptions. Use scout for codebase reconnaissance and avoid subagents for tiny local edits. User agents can be added as markdown files in ~/.pi/agent/agents.",
+			"Delegate a task to a subagent with isolated context. Provide agent to use a named agent like scout, or omit agent for an ad-hoc isolated pi agent. Use scout for codebase reconnaissance and avoid subagents for tiny local edits. User agents can be added as markdown files in ~/.pi/agent/agents.",
 		parameters: ToolParams,
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			const task = params.task.trim();
 			const discovery = discoverAgents(ctx.cwd);
 			const availableAgents = formatAgentList(discovery.agents);
-			const agent = discovery.agents.find(
-				(candidate) => candidate.name === params.agent,
-			);
+			const namedAgent = params.agent
+				? discovery.agents.find((candidate) => candidate.name === params.agent)
+				: undefined;
 
 			if (!task) {
 				return {
 					isError: true,
 					content: [{ type: "text", text: "Task is required." }],
 					details: {
-						agent: params.agent,
+						agent: params.agent ?? "adhoc",
 						task,
 						exitCode: 1,
 						toolCalls: [],
@@ -184,7 +187,7 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
-			if (!agent) {
+			if (params.agent && !namedAgent) {
 				return {
 					isError: true,
 					content: [
@@ -203,13 +206,16 @@ export default function (pi: ExtensionAPI) {
 				};
 			}
 
+			const agentName = namedAgent?.name ?? "adhoc";
+			const agentSource = namedAgent?.source ?? "adhoc";
+			const systemPrompt = namedAgent?.systemPrompt ?? "";
 			const selectedModel = resolveModel(
-				agent.model,
+				namedAgent?.model,
 				ctx.modelRegistry.getAvailable(),
 			);
 			const baseDetails: ToolDetails = {
-				agent: agent.name,
-				agentSource: agent.source,
+				agent: agentName,
+				agentSource,
 				task,
 				model: selectedModel,
 				exitCode: -1,
@@ -234,9 +240,9 @@ export default function (pi: ExtensionAPI) {
 				const run = await runSubagent({
 					cwd: params.cwd ?? ctx.cwd,
 					task,
-					systemPrompt: agent.systemPrompt,
+					systemPrompt,
 					model: selectedModel,
-					tools: agent.tools,
+					tools: namedAgent?.tools,
 					signal,
 					onProgress: onUpdate
 						? (state) => {
@@ -270,8 +276,8 @@ export default function (pi: ExtensionAPI) {
 						run.stderr.trim() ||
 						"(no output)";
 				const details: ToolDetails = {
-					agent: agent.name,
-					agentSource: agent.source,
+					agent: agentName,
+					agentSource,
 					task,
 					model: run.model ?? selectedModel,
 					exitCode: run.exitCode,
@@ -303,7 +309,7 @@ export default function (pi: ExtensionAPI) {
 		renderCall(args, theme) {
 			const text =
 				theme.fg("toolTitle", theme.bold("subagent ")) +
-				theme.fg("accent", args.agent || "...") +
+				theme.fg("accent", args.agent || "adhoc") +
 				"\n" +
 				theme.fg("dim", args.task || "...");
 			return new Text(text, 0, 0);
