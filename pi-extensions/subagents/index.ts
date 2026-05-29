@@ -3,7 +3,11 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { type AgentConfig, discoverAgents, formatAgentList } from "./agents.js";
-import { runSubagent, type SubagentToolCall } from "./runner.js";
+import {
+	runSubagent,
+	type SubagentToolCall,
+	type UsageStats,
+} from "./runner.js";
 
 const ToolParams = Type.Object({
 	agent: Type.String({
@@ -24,6 +28,8 @@ interface ToolDetails {
 	stopReason?: string;
 	stderr?: string;
 	toolCalls: SubagentToolCall[];
+	usage?: UsageStats;
+	malformedJsonLines?: number;
 	running?: boolean;
 	availableAgents?: string;
 }
@@ -89,6 +95,49 @@ function formatToolCall(toolCall: SubagentToolCall): string {
 	return `${toolCall.name} ${preview}`;
 }
 
+function formatTokens(count: number): string {
+	if (count < 1000) return count.toString();
+	if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
+	if (count < 1000000) return `${Math.round(count / 1000)}k`;
+	return `${(count / 1000000).toFixed(1)}M`;
+}
+
+function formatUsage(
+	usage: UsageStats | undefined,
+	model: string | undefined,
+): string {
+	if (!usage) return model ?? "";
+	const parts: string[] = [];
+	if (usage.turns)
+		parts.push(`${usage.turns} turn${usage.turns === 1 ? "" : "s"}`);
+	if (usage.input) parts.push(`↑${formatTokens(usage.input)}`);
+	if (usage.output) parts.push(`↓${formatTokens(usage.output)}`);
+	if (usage.cacheRead) parts.push(`R${formatTokens(usage.cacheRead)}`);
+	if (usage.cacheWrite) parts.push(`W${formatTokens(usage.cacheWrite)}`);
+	if (usage.cost) parts.push(`$${usage.cost.toFixed(4)}`);
+	if (usage.contextTokens)
+		parts.push(`ctx:${formatTokens(usage.contextTokens)}`);
+	if (model) parts.push(model);
+	return parts.join(" ");
+}
+
+function formatDetailedAgentList(agents: AgentConfig[]): string {
+	return agents
+		.map((agent) => {
+			const details = [
+				`source: ${agent.source}`,
+				agent.model ? `model: ${agent.model}` : undefined,
+				agent.tools?.length
+					? `tools: ${agent.tools.join(", ")}`
+					: "tools: default",
+			]
+				.filter(Boolean)
+				.join(", ");
+			return `${agent.name} (${details})\n  ${agent.description}`;
+		})
+		.join("\n\n");
+}
+
 export default function (pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		const discovery = discoverAgents(ctx.cwd);
@@ -96,11 +145,22 @@ export default function (pi: ExtensionAPI) {
 		ctx.ui.notify(`Subagents available:\n${summary || "none"}`, "info");
 	});
 
+	pi.registerCommand("subagents", {
+		description: "List available subagents",
+		handler: async (_args, ctx) => {
+			const discovery = discoverAgents(ctx.cwd);
+			ctx.ui.notify(
+				`Available subagents:\n\n${formatDetailedAgentList(discovery.agents) || "none"}`,
+				"info",
+			);
+		},
+	});
+
 	pi.registerTool({
 		name: "subagent",
 		label: "Subagent",
 		description:
-			"Delegate a task to a named subagent with isolated context. Built-in scout is available by default; user agents can be added as markdown files in ~/.pi/agent/agents.",
+			"Delegate a task to a named subagent with isolated context. Choose agents by their descriptions. Use scout for codebase reconnaissance and avoid subagents for tiny local edits. User agents can be added as markdown files in ~/.pi/agent/agents.",
 		parameters: ToolParams,
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			const task = params.task.trim();
@@ -154,6 +214,15 @@ export default function (pi: ExtensionAPI) {
 				model: selectedModel,
 				exitCode: -1,
 				toolCalls: [],
+				usage: {
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					cost: 0,
+					contextTokens: 0,
+					turns: 0,
+				},
 				running: true,
 			};
 			onUpdate?.({
@@ -180,6 +249,7 @@ export default function (pi: ExtensionAPI) {
 										model: state.model ?? selectedModel,
 										stopReason: state.stopReason,
 										toolCalls: state.toolCalls,
+										usage: state.usage,
 									},
 								});
 							}
@@ -208,6 +278,8 @@ export default function (pi: ExtensionAPI) {
 					stopReason: run.stopReason,
 					stderr: run.stderr.trim() || undefined,
 					toolCalls: run.toolCalls,
+					usage: run.usage,
+					malformedJsonLines: run.malformedJsonLines,
 					running: false,
 				};
 				return { isError, content: [{ type: "text", text }], details };
@@ -259,12 +331,25 @@ export default function (pi: ExtensionAPI) {
 						: theme.fg("success", "✓");
 			if (details) {
 				lines.push(
-					`${status} ${theme.fg("toolTitle", theme.bold(details.agent))}${details.agentSource ? theme.fg("muted", ` (${details.agentSource})`) : ""}${details.model ? theme.fg("dim", ` ${details.model}`) : ""}`,
+					`${status} ${theme.fg("toolTitle", theme.bold(details.agent))}${details.agentSource ? theme.fg("muted", ` (${details.agentSource})`) : ""}`,
 				);
 			}
 
+			if (expanded && details) {
+				lines.push("");
+				lines.push(theme.fg("muted", "─── Task ───"));
+				lines.push(theme.fg("dim", details.task));
+			}
+
 			if (shownToolCalls.length > 0) {
-				lines.push(theme.fg("muted", `🔧 calls (${toolCalls.length}):`));
+				if (expanded) {
+					lines.push("");
+					lines.push(
+						theme.fg("muted", `─── Tool calls (${toolCalls.length}) ───`),
+					);
+				} else {
+					lines.push(theme.fg("muted", `🔧 calls (${toolCalls.length}):`));
+				}
 				for (const toolCall of shownToolCalls)
 					lines.push(theme.fg("dim", `  → ${formatToolCall(toolCall)}`));
 				if (!expanded && toolCalls.length > shownToolCalls.length)
@@ -276,7 +361,28 @@ export default function (pi: ExtensionAPI) {
 					);
 			}
 
+			if (expanded) {
+				lines.push("");
+				lines.push(theme.fg("muted", "─── Output ───"));
+			}
 			lines.push(isError ? theme.fg("error", shownOutput) : shownOutput);
+
+			if (expanded && details?.stderr) {
+				lines.push("");
+				lines.push(theme.fg("muted", "─── stderr ───"));
+				lines.push(theme.fg("error", details.stderr));
+			}
+			if (expanded && details?.malformedJsonLines) {
+				lines.push(
+					theme.fg(
+						"dim",
+						`Ignored malformed JSON lines: ${details.malformedJsonLines}`,
+					),
+				);
+			}
+
+			const usage = formatUsage(details?.usage, details?.model);
+			if (usage) lines.push(theme.fg("dim", usage));
 			if (
 				!expanded &&
 				(outputLines.length > 10 || toolCalls.length > shownToolCalls.length)

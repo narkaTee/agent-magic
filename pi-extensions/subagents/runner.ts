@@ -10,6 +10,16 @@ export interface SubagentToolCall {
 	arguments: Record<string, unknown>;
 }
 
+export interface UsageStats {
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	cost: number;
+	contextTokens: number;
+	turns: number;
+}
+
 export interface RunSubagentOptions {
 	cwd: string;
 	task: string;
@@ -20,6 +30,7 @@ export interface RunSubagentOptions {
 	onProgress?: (state: {
 		text: string;
 		toolCalls: SubagentToolCall[];
+		usage: UsageStats;
 		model?: string;
 		stopReason?: string;
 	}) => void;
@@ -31,9 +42,20 @@ export interface RunSubagentResult {
 	messages: Message[];
 	finalText: string;
 	toolCalls: SubagentToolCall[];
+	usage: UsageStats;
+	malformedJsonLines: number;
 	stopReason?: string;
 	errorMessage?: string;
 	model?: string;
+}
+
+interface MessageUsage {
+	input?: number;
+	output?: number;
+	cacheRead?: number;
+	cacheWrite?: number;
+	totalTokens?: number;
+	cost?: { total?: number };
 }
 
 function extractAssistantText(message: Message): string {
@@ -94,7 +116,17 @@ export async function runSubagent(
 	let stopReason: string | undefined;
 	let errorMessage: string | undefined;
 	let model: string | undefined;
+	let malformedJsonLines = 0;
 	let aborted = false;
+	const usage: UsageStats = {
+		input: 0,
+		output: 0,
+		cacheRead: 0,
+		cacheWrite: 0,
+		cost: 0,
+		contextTokens: 0,
+		turns: 0,
+	};
 
 	try {
 		const exitCode = await new Promise<number>((resolve) => {
@@ -116,6 +148,7 @@ export async function runSubagent(
 				options.onProgress?.({
 					text: finalText,
 					toolCalls: [...toolCalls],
+					usage: { ...usage },
 					model,
 					stopReason,
 				});
@@ -128,6 +161,7 @@ export async function runSubagent(
 				try {
 					event = JSON.parse(trimmed);
 				} catch {
+					malformedJsonLines++;
 					return;
 				}
 				if (!event || typeof event !== "object") return;
@@ -136,6 +170,16 @@ export async function runSubagent(
 				const message = messageEnd.message as Message;
 				messages.push(message);
 				if (message.role !== "assistant") return;
+				usage.turns++;
+				const messageUsage = (message as { usage?: MessageUsage }).usage;
+				if (messageUsage) {
+					usage.input += messageUsage.input || 0;
+					usage.output += messageUsage.output || 0;
+					usage.cacheRead += messageUsage.cacheRead || 0;
+					usage.cacheWrite += messageUsage.cacheWrite || 0;
+					usage.cost += messageUsage.cost?.total || 0;
+					usage.contextTokens = messageUsage.totalTokens || usage.contextTokens;
+				}
 
 				const messageToolCalls = extractAssistantToolCalls(message);
 				let changed = false;
@@ -208,6 +252,8 @@ export async function runSubagent(
 			messages,
 			finalText,
 			toolCalls,
+			usage,
+			malformedJsonLines,
 			stopReason,
 			errorMessage,
 			model,
