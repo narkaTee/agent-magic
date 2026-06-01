@@ -189,8 +189,8 @@ function normalizeFetchUrl(url: URL): URL {
 
 export default function (pi: ExtensionAPI) {
 	pi.registerTool({
-		name: "web_search",
-		label: "Web Search",
+		name: "brave_search",
+		label: "Brave Search",
 		description:
 			"Search the web via Brave Search API and return a concise LLM-friendly result set. Requires BRAVE_SEARCH_API_KEY in environment.",
 		parameters: WebSearchParams,
@@ -282,7 +282,7 @@ export default function (pi: ExtensionAPI) {
 		},
 		renderCall(args, theme) {
 			return new Text(
-				theme.fg("toolTitle", theme.bold("web_search ")) +
+				theme.fg("toolTitle", theme.bold("brave_search ")) +
 					theme.fg("muted", String(args.query ?? "")),
 				0,
 				0,
@@ -295,7 +295,7 @@ export default function (pi: ExtensionAPI) {
 				return new Text(
 					theme.fg(
 						"error",
-						text?.type === "text" ? text.text : "web_search failed",
+						text?.type === "text" ? text.text : "brave_search failed",
 					),
 					0,
 					0,
