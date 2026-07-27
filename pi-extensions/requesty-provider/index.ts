@@ -12,7 +12,7 @@ const MODELS_BASE_URL = `${BASE_URL}/v1`;
 const DEFAULT_CONTEXT_WINDOW = 128000;
 const DEFAULT_MAX_TOKENS = 4096;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
 
 const CACHE_FILE = path.join(
 	os.homedir(),
@@ -30,6 +30,36 @@ function apiKeyHash(apiKey: string): string {
 	return crypto.createHash("sha256").update(apiKey).digest("hex");
 }
 
+function isUsableModel(id: string): boolean {
+	// Requesty exposes both Azure Chat Completions and Responses routes for GPT-5.5/5.6; the plain Azure routes fail with tools + reasoning.
+	if (/^azure\/(?:gpt-5\.5|gpt-5\.6-(?:luna|sol|terra))@/.test(id)) {
+		return false;
+	}
+	// nebius/glm-5.2 is present in the catalog but Requesty returns 404 for chat requests.
+	if (id === "nebius/glm-5.2") return false;
+	// nebius/google/gemma-3-27b-it emits markdown that looks like a tool call instead of actually calling tools.
+	if (id === "nebius/google/gemma-3-27b-it") return false;
+	return true;
+}
+
+function modelApiOverride(id: string): Pick<ModelEntry, "api" | "baseUrl"> {
+	if (id.startsWith("mistral/")) {
+		return { api: "openai-completions", baseUrl: MODELS_BASE_URL };
+	}
+	if (id.startsWith("bedrock/kimi-")) {
+		// Bedrock Kimi rejects Anthropic thinking budgets translated as numeric reasoning_effort; OpenAI Chat keeps tool use and reasoning working.
+		return { api: "openai-completions", baseUrl: MODELS_BASE_URL };
+	}
+	if (id.startsWith("bedrock/minimax-")) {
+		// Bedrock MiniMax has the same Anthropic thinking-budget translation issue.
+		return { api: "openai-completions", baseUrl: MODELS_BASE_URL };
+	}
+	if (id.startsWith("nebius/")) {
+		return { api: "openai-completions", baseUrl: MODELS_BASE_URL };
+	}
+	return {};
+}
+
 type ModelEntry = {
 	id: string;
 	name: string;
@@ -43,6 +73,8 @@ type ModelEntry = {
 	};
 	contextWindow: number;
 	maxTokens: number;
+	api?: "openai-completions";
+	baseUrl?: string;
 };
 
 type CacheFile = {
@@ -117,9 +149,11 @@ async function fetchModels(apiKey: string): Promise<ModelEntry[]> {
 				m !== null &&
 				typeof m === "object" &&
 				typeof (m as Record<string, unknown>).id === "string" &&
-				((m as Record<string, unknown>).id as string).length > 0,
+				((m as Record<string, unknown>).id as string).length > 0 &&
+				isUsableModel((m as Record<string, unknown>).id as string),
 		)
 		.map((m) => ({
+			...modelApiOverride(m.id as string),
 			id: m.id as string,
 			name:
 				typeof m.name === "string" && (m.name as string).length > 0
@@ -141,7 +175,7 @@ async function fetchModels(apiKey: string): Promise<ModelEntry[]> {
 					? m.context_window
 					: DEFAULT_CONTEXT_WINDOW,
 			maxTokens:
-				typeof m.max_output_tokens === "number"
+				typeof m.max_output_tokens === "number" && m.max_output_tokens > 0
 					? m.max_output_tokens
 					: DEFAULT_MAX_TOKENS,
 		}));
