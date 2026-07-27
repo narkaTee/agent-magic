@@ -7,7 +7,8 @@ import type {
 	ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
 
-const BASE_URL = "https://router.eu.requesty.ai/v1";
+const BASE_URL = "https://router.eu.requesty.ai";
+const MODELS_BASE_URL = `${BASE_URL}/v1`;
 const DEFAULT_CONTEXT_WINDOW = 128000;
 const DEFAULT_MAX_TOKENS = 4096;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -58,7 +59,7 @@ function readCache(apiKey: string): ModelEntry[] | null {
 		const data = JSON.parse(raw) as CacheFile;
 		if (
 			data.version !== CACHE_VERSION ||
-			data.baseUrl !== BASE_URL ||
+			data.baseUrl !== MODELS_BASE_URL ||
 			data.apiKeyHash !== apiKeyHash(apiKey) ||
 			Date.now() - data.fetchedAt > CACHE_TTL_MS
 		) {
@@ -82,7 +83,7 @@ function writeCache(apiKey: string, models: ModelEntry[]): void {
 		const data: CacheFile = {
 			version: CACHE_VERSION,
 			fetchedAt: Date.now(),
-			baseUrl: BASE_URL,
+			baseUrl: MODELS_BASE_URL,
 			apiKeyHash: apiKeyHash(apiKey),
 			models,
 		};
@@ -97,7 +98,7 @@ function writeCache(apiKey: string, models: ModelEntry[]): void {
 }
 
 async function fetchModels(apiKey: string): Promise<ModelEntry[]> {
-	const response = await fetch(`${BASE_URL}/models`, {
+	const response = await fetch(`${MODELS_BASE_URL}/models`, {
 		headers: { Authorization: `Bearer ${apiKey}` },
 	});
 
@@ -154,7 +155,11 @@ export default async function (pi: ExtensionAPI) {
 		pi.registerProvider("requesty", {
 			baseUrl: BASE_URL,
 			apiKey: "!echo $REQUESTY_API_KEY",
-			api: "openai-completions",
+			api: "anthropic-messages",
+			headers: {
+				"HTTP-Referer": "https://pi.dev",
+				"X-Title": "Pi",
+			},
 			models,
 		});
 	};
