@@ -22,7 +22,9 @@ export interface AgentDiscoveryResult {
 const BUILTIN_SCOUT: AgentConfig = {
 	name: "scout",
 	description:
-		"Fast codebase reconnaissance. Use for quick discovery of files, call paths, dependencies, and ownership. Skip for small, local, obvious changes.",
+		"Fast codebase reconnaissance. Use for quick and simple discovery of files, call paths, dependencies, and ownership."
+		 + "This will use a smaller and faster model so limit your requests to reconnaissance and light analysis not on deep analysis that require advanced reasoning."
+		 + "Skip for small, local, obvious changes.",
 	tools: ["read", "grep", "find", "ls"],
 	model: "auto-fast",
 	source: "builtin",
