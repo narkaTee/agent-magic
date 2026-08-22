@@ -122,9 +122,10 @@ function resolveModel(
 			"claude-haiku-4-5",
 			"claude-haiku-4.5",
 			"gemini-2.5-flash",
+			"gpt-5.6-luna",
 			"gpt-5.4-mini",
 		],
-		["haiku", "flash", "mini", "fast"],
+		["haiku", "flash", "mini", "fast", "-luna"],
 	);
 	return selected ? `${selected.provider}/${selected.id}` : undefined;
 }
