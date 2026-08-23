@@ -5,7 +5,11 @@ description: Run non-trival CLI applications using tmux. Use when you need to ru
 
 # Testing interactive CLI apps with tmux
 
-When testing interactive CLI applications, use tmux to run them in a extra session. This lets you send input, read output, and verify behavior without blocking the agent.
+When testing **interactive** CLI applications, use tmux to run them in a new session. This lets you send input, read output, and verify behavior without blocking the agent.
+
+Use a new TMUX Session to not mess with the Users session. Only use the current session if the user explicitly requests it.
+
+Starting a shell in the new window is a good idea to keep the window open if the app crashes or exits unexpectedly. You can also use this shell to run other commands in the same session.
 
 ## Before starting the app
 
