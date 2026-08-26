@@ -393,15 +393,33 @@ function parallelContent(results: SubagentResult[]): string {
 
 export default function (pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
-		const discovery = discoverAgents(ctx.cwd);
+		const discovery = discoverAgents(ctx.cwd, ctx.isProjectTrusted());
 		const summary = formatAgentList(discovery.agents);
 		ctx.ui.notify(`Subagents available:\n${summary || "none"}`, "info");
+	});
+
+	pi.on("before_agent_start", async (event, ctx) => {
+		const discovery = discoverAgents(ctx.cwd, ctx.isProjectTrusted());
+		const summary = formatAgentList(discovery.agents);
+		if (!summary) return;
+
+		return {
+			systemPrompt: `${event.systemPrompt}
+
+Available subagents for the subagent tool:
+${summary}
+
+Choose the named agent whose description matches the task.
+Each subagent has isolated context, so provide a self-contained assignment with all relevant goals, constraints, paths, and prior findings.
+When several independent reconnaissance questions are needed, use parallel Scout tasks rather than one broad task.
+Avoid subagents for tiny, local, obvious tasks.`,
+		};
 	});
 
 	pi.registerCommand("subagents", {
 		description: "List available subagents",
 		handler: async (_args, ctx) => {
-			const discovery = discoverAgents(ctx.cwd);
+			const discovery = discoverAgents(ctx.cwd, ctx.isProjectTrusted());
 			ctx.ui.notify(
 				`Available subagents:\n\n${formatDetailedAgentList(discovery.agents) || "none"}`,
 				"info",
@@ -413,10 +431,10 @@ export default function (pi: ExtensionAPI) {
 		name: "subagent",
 		label: "Subagent",
 		description:
-			"Delegate tasks to subagents with isolated context. Use single mode with agent/task, or parallel mode with tasks. Provide agent to use a named agent like scout, or omit agent in single mode for an ad-hoc isolated pi agent. Use scout for codebase reconnaissance and avoid subagents for tiny local edits.",
+			"Delegate work to a named or ad-hoc subagent, or run multiple tasks in parallel.",
 		parameters: ToolParams,
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			const discovery = discoverAgents(ctx.cwd);
+			const discovery = discoverAgents(ctx.cwd, ctx.isProjectTrusted());
 			const availableAgents = formatAgentList(discovery.agents);
 			const models = ctx.modelRegistry.getAvailable();
 			const hasParallel = params.tasks !== undefined;

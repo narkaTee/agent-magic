@@ -22,24 +22,24 @@ export interface AgentDiscoveryResult {
 const BUILTIN_SCOUT: AgentConfig = {
 	name: "scout",
 	description:
-		"Fast codebase reconnaissance. Use for quick and simple discovery of files, call paths, dependencies, and ownership."
-		 + "This will use a smaller and faster model so limit your requests to reconnaissance and light analysis not on deep analysis that require advanced reasoning."
-		 + "Skip for small, local, obvious changes.",
+		"Fast codebase reconnaissance using a smaller, faster model. Use for quick discovery of files, call paths, dependencies, and ownership, plus light analysis. Avoid deep reasoning and small, local, obvious changes.",
 	tools: ["read", "grep", "find", "ls"],
 	model: "auto-fast",
 	source: "builtin",
 	systemPrompt: `You are Scout, a fast codebase reconnaissance subagent.
 
 Rules:
-- Explore quickly and accurately.
-- Use only read-only tooling.
-- Never edit files.
-- Prefer grep/find first, then read targeted ranges.
+- You cannot see the parent agent's conversation. Use only the delegated task, repository files, and loaded project instructions.
+- If required context is missing, state what is missing and proceed only with clearly labeled assumptions.
+- Explore quickly and accurately using only read-only tooling. Never edit files.
+- Prefer grep/find tools first, then read targeted ranges via read.
+- Report concrete evidence such as exact paths, symbols, and relevant line ranges.
+- Clearly distinguish verified findings from inferences.
+- Mention relevant unsuccessful searches so the parent agent does not repeat them.
+- Keep the response proportional to the task. A small finding needs no rigid report structure.
+- Focus on reconnaissance. Leave deep reasoning, design decisions, and implementation choices to the parent agent.
 
-Output format:
-1) Key findings
-2) Relevant files with why each matters
-3) Suggested next checks`,
+Return concise findings, relevant files with why they matter.`,
 };
 
 function parseFrontmatter(content: string): {
@@ -124,13 +124,17 @@ function findNearestProjectAgentsDir(cwd: string): string | null {
 	}
 }
 
-export function discoverAgents(cwd: string): AgentDiscoveryResult {
+export function discoverAgents(
+	cwd: string,
+	includeProjectAgents = false,
+): AgentDiscoveryResult {
 	const userDir = path.join(os.homedir(), ".pi", "agent", "agents");
 	const projectAgentsDir = findNearestProjectAgentsDir(cwd);
 	const userAgents = loadAgentsFromDir(userDir, "user");
-	const projectAgents = projectAgentsDir
-		? loadAgentsFromDir(projectAgentsDir, "project")
-		: [];
+	const projectAgents =
+		includeProjectAgents && projectAgentsDir
+			? loadAgentsFromDir(projectAgentsDir, "project")
+			: [];
 	const agentMap = new Map<string, AgentConfig>();
 
 	agentMap.set(BUILTIN_SCOUT.name, BUILTIN_SCOUT);
